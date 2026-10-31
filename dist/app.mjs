@@ -149,7 +149,7 @@ function drawChart(){
   histories.forEach((hist,index)=>{const color=index?'#9981cd':'#198970';c.beginPath();hist.forEach((a,i)=>{const [x,y]=xy(a);i?c.lineTo(x,y):c.moveTo(x,y);});if(hist.length===1){const [x,y]=xy(hist[0]);c.lineTo(x+1,y);}c.strokeStyle=color;c.lineWidth=index?1.5:1.9;c.setLineDash(index?[4,3]:[]);c.stroke();c.setLineDash([]);
     if(!index){const last=xy(hist.at(-1));c.lineTo(last[0],top+ph);c.lineTo(left,top+ph);c.closePath();const gradient=c.createLinearGradient(0,top,0,top+ph);gradient.addColorStop(0,'#19897013');gradient.addColorStop(1,'#19897002');c.fillStyle=gradient;c.fill();circle(c,last[0],last[1],3,'#198970','#fff',1.5);}});c.textAlign='left';
 }
-function advance(){if(sim.iteration>=state.limit)return;sim.step();comparison?.step();if(sim.iteration>=state.limit){pause();toast('反復上限に到達しました。結果を保存したり、設定を変えて再実験できます。');}}
+function advance(){if(sim.iteration>=state.limit)return;sim.step();comparison?.step();if(sim.iteration>=state.limit){pause();updateMetrics();toast('反復上限に到達しました。結果を保存したり、設定を変えて再実験できます。');}}
 function toggleRun(){if(state.running){pause();return;}if(sim.iteration>=state.limit)reset();state.running=true;lastTime=performance.now();accumulator=0;updateRunButton();}
 function frame(time){
   if(state.running&&!document.hidden){const delta=Math.min((time-lastTime)/1000,.12);accumulator+=delta*30*state.speed;let count=0;const start=performance.now();while(accumulator>=1&&state.running&&count<80&&performance.now()-start<12){advance();accumulator--;count++;}if(count){draw();drawChart();if(time-lastMetricTime>80){updateMetrics();lastMetricTime=time;}}}
