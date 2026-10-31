@@ -2,6 +2,14 @@
 
 日本語のメタヒューリスティクス可視化サイト。ビルド不要・依存パッケージ不要の静的Webアプリです。
 
+公開サイト: **https://kazu107.github.io/heuristic-lab/**
+
+## GitHub Pagesへの公開
+
+GitHub Actionsの `.github/workflows/pages.yml` が、`main` のサイト・テスト・ワークフローの変更時に検証と公開を行います。19件のテストとJavaScript構文チェックに成功すると、`dist/` をGitHub Pagesに配置します。Actionsタブの **Test and deploy to GitHub Pages → Run workflow** から手動実行もできます。
+
+GitHubの **Settings → Pages → Source** は **GitHub Actions** に設定します。サイトのURLは上記の通りで、ログインなしで閲覧できます。HTML・CSS・ES modulesの参照は相対パスなので、`/heuristic-lab/` のサブディレクトリにも対応しています。Google Fontsの外部通信以外、計算サーバーやAPIキーは不要です。
+
 ## 起動
 
 ```sh
