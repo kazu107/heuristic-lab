@@ -1,0 +1,265 @@
+/* Layout rules live after the visual theme so breakpoints stay in one place. */
+:root {
+  --header-height: 78px;
+  --page-gutter: clamp(24px, 2.1vw, 56px);
+  --workspace-gap: clamp(16px, 1.25vw, 32px);
+  --settings-width: clamp(256px, 15vw, 400px);
+}
+
+.topbar {
+  position: sticky;
+  top: 0;
+  height: var(--header-height);
+}
+
+.app-shell { width: 100%; }
+
+main {
+  flex: 1 1 0;
+  width: 0;
+  max-width: none;
+  padding-inline: var(--page-gutter);
+  min-height: calc(100dvh - var(--header-height));
+}
+
+.sidebar {
+  position: sticky;
+  top: var(--header-height);
+  align-self: flex-start;
+  height: calc(100dvh - var(--header-height));
+  min-height: 0;
+  overflow-y: auto;
+  scrollbar-width: thin;
+  overscroll-behavior: contain;
+}
+
+.sidebar-bottom { margin-top: auto; }
+.side-footer { margin-top: 12px; }
+
+.workspace {
+  grid-template-columns: minmax(0, 1fr) var(--settings-width);
+  gap: var(--workspace-gap);
+  align-items: start;
+}
+
+.settings-column,
+.settings-panel,
+.settings-content,
+.experiment-heading > div:first-child { min-width: 0; }
+
+.canvas-wrap {
+  /* Width and viewport height both contribute; short laptops keep controls close. */
+  height: clamp(300px, min(34vw, 43dvh), 820px);
+}
+
+.chart-wrap { height: clamp(140px, 15dvh, 260px); }
+.panel-heading { flex-wrap: wrap; min-height: 54px; height: auto; padding-block: 10px; }
+.view-controls { margin-left: auto; }
+.canvas-legend,
+.chart-footer { flex-wrap: wrap; row-gap: 9px; }
+.small-check { flex-shrink: 0; }
+.small-check span { max-width: none; }
+.title-row { flex-wrap: wrap; row-gap: 6px; }
+.experiment-heading p { overflow-wrap: anywhere; }
+.live-param-note { white-space: normal; line-height: 1.8; }
+.live-param-note > span { flex: none; }
+.param-top { gap: 8px; }
+.param-top label { min-width: 0; }
+.param-value { flex: none; }
+.main-footer { flex-wrap: wrap; row-gap: 9px; }
+.settings-panel .panel-heading { min-height: 54px; height: auto; }
+.active-method > div { min-width: 0; }
+.active-method #methodEn { overflow-wrap: anywhere; }
+
+/* Wide monitors: use the entire screen and give controls readable proportions. */
+@media (min-width: 1600px) {
+  :root { --sidebar: clamp(236px, 10.5vw, 320px); }
+  main { padding-top: 32px; }
+  .intro { margin-bottom: 30px; }
+  h1 { font-size: clamp(30px, 1.35vw, 44px); }
+  .intro p { font-size: 12px; }
+  .experiment-heading p { font-size: 12px; }
+  .metric-label { font-size: 12px; }
+  .metric strong { font-size: clamp(30px, 1.4vw, 42px); }
+  .metric-suffix,
+  .improvement { font-size: 12px; }
+  .metrics { padding-block: 21px; }
+  .side-section-title { font-size: 12px; }
+  .problem-item strong { font-size: 13px; }
+  .problem-item small { font-size: 10px; }
+  .method-item strong { font-size: 12px; }
+  .method-item small { font-size: 10px; }
+  .problem-item { padding-block: 15px; }
+  .method-item { padding-block: 12px; }
+  .panel-title h3 { font-size: 13px; }
+  .panel-heading { min-height: 62px; }
+  .settings-panel .panel-heading { min-height: 62px; }
+  .settings-content { padding: 22px; }
+  .active-method strong { font-size: 13px; }
+  .active-method #methodEn { font-size: 10px; }
+  .param-top { font-size: 12px; }
+  .param-value { font-size: 12px; }
+  .param-help { font-size: 10px; }
+  .range-labels { font-size: 9px; }
+  .live-param-note { font-size: 9px; }
+  .section-label { font-size: 12px; }
+  .section-label > span { font-size: 9px; }
+  .field-row { font-size: 11px; }
+  .field-row input,
+  .field-row select { font-size: 12px; min-height: 34px; }
+  .field-row .wide-select { width: 142px; font-size: 11px; }
+  .compare-row strong { font-size: 12px; }
+  .compare-row > div > span,
+  .compare-note { font-size: 10px; }
+  #compareSettings select { font-size: 12px; }
+  .insight-card { padding: 22px; }
+  .insight-card h3 { font-size: 14px; }
+  .insight-card p { font-size: 11px; }
+  .insight-card button { font-size: 10px; }
+  .canvas-legend,
+  .chart-footer { font-size: 11px; }
+  .small-check,
+  .small-check span { font-size: 10px; }
+  .experiment-note { font-size: 10px; }
+  .run-button { min-width: 170px; font-size: 12px; }
+  .segmented button { font-size: 11px; }
+  .status-text,
+  .chart-subtitle { font-size: 10px; }
+  .speed-control { font-size: 11px; }
+  .transport { padding-block: 16px; }
+}
+
+/* Keep the visualization useful on ultrawide displays without an enormous row. */
+@media (min-width: 2200px) {
+  .visual-column {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) minmax(320px, 23%);
+    gap: var(--workspace-gap);
+    align-items: start;
+  }
+  .visualization-panel { grid-column: 1; grid-row: 1; }
+  .chart-panel { grid-column: 2; grid-row: 1; margin-top: 0; }
+  .chart-wrap { height: clamp(240px, 26dvh, 440px); }
+  .chart-panel .panel-heading { min-height: 62px; }
+  .chart-panel .chart-subtitle { display: none; }
+  .chart-footer { gap: 10px; }
+  .chart-axis-label { width: 100%; justify-content: flex-end; }
+  .experiment-note { grid-column: 1 / -1; margin-top: -12px; }
+  .canvas-wrap { height: clamp(440px, min(42vw, 52dvh), 900px); }
+}
+
+/* Compact desktop screens retain three columns without squeezing their controls. */
+@media (min-width: 1024px) and (max-width: 1250px) {
+  :root { --settings-width: 246px; --workspace-gap: 16px; --page-gutter: 22px; }
+}
+
+/* Tablets: the chooser becomes a drawer and settings move beneath the canvas. */
+@media (max-width: 1023px) {
+  :root { --page-gutter: 24px; --workspace-gap: 18px; }
+  main { width: 100%; }
+  .app-shell { display: block; }
+  .sidebar {
+    position: fixed;
+    inset: var(--header-height) auto 0 0;
+    display: none;
+    width: min(280px, calc(100vw - 40px));
+    height: calc(100dvh - var(--header-height));
+    min-height: 0;
+    padding: 24px 19px 18px;
+    box-shadow: 20px 0 60px #20382b20;
+    z-index: 9;
+  }
+  .sidebar.open { display: flex; }
+  .sidebar-bottom { padding-top: 30px; }
+  .mobile-menu { display: grid; }
+  .compute-status { display: none; }
+  .topbar { gap: 22px; padding-inline: 24px; }
+  .topnav { margin-left: auto; gap: 22px; }
+  .workspace { grid-template-columns: minmax(0, 1fr); }
+  .settings-column {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+    gap: 18px;
+    align-items: start;
+  }
+  .insight-card { margin-top: 0; }
+  .canvas-wrap { height: clamp(320px, min(55vw, 50dvh), 520px); }
+  .chart-wrap { height: clamp(150px, 20dvh, 210px); }
+  .metric-label { font-size: 10px; }
+  .metric { padding-inline: 18px; }
+  .metric strong { font-size: 26px; }
+  .metric-suffix { font-size: 10px; }
+  .settings-content { padding: 19px; }
+  .active-method strong { font-size: 12px; }
+  .active-method #methodEn { font-size: 9px; }
+  .param-top { font-size: 11px; }
+  .param-help { font-size: 9px; }
+  .section-label { font-size: 11px; }
+  .field-row { font-size: 10px; }
+}
+
+@media (min-width: 651px) and (max-width: 799px) {
+  .topnav #aboutNav { display: none; }
+  .metrics { grid-template-columns: repeat(4, minmax(0, 1fr)); }
+  .metric { padding-inline: 13px; }
+  .metric strong { font-size: 24px; }
+  .metric > div { flex-wrap: wrap; row-gap: 4px; }
+}
+
+/* Phones: one column, wrapping toolbars, and a drawer that stays in the viewport. */
+@media (max-width: 650px) {
+  :root { --header-height: 66px; --page-gutter: 17px; }
+  main { width: 100%; padding-top: 24px; }
+  .topbar { gap: 12px; padding-inline: 15px; }
+  .topnav { gap: 0; }
+  .settings-column { grid-template-columns: minmax(0, 1fr); }
+  .metrics { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .metric { padding-inline: 16px; }
+  .metric > div { flex-wrap: wrap; row-gap: 5px; }
+  .experiment-heading { gap: 10px; }
+  .title-row h2 { font-size: clamp(13px, 3.7vw, 16px); }
+  .heading-actions { gap: 7px; }
+  .canvas-wrap { height: clamp(270px, 66vw, 390px); }
+  .canvas-legend { gap: 10px; }
+  .small-check { margin-left: 0; }
+  .small-check span { max-width: none; }
+  .transport { flex-wrap: wrap; padding: 13px 12px; row-gap: 12px; }
+  .transport-buttons { gap: 6px; }
+  .speed-control { margin-left: auto; }
+  .chart-wrap { height: 155px; }
+  .chart-subtitle { display: none; }
+  .chart-footer { column-gap: 10px; }
+  .chart-axis-label { margin-left: auto; }
+  .active-method #methodEn { font-size: 9px; }
+  .live-param-note { font-size: 9px; }
+  .main-footer { column-gap: 10px; }
+}
+
+@media (max-width: 359px) {
+  :root { --page-gutter: 12px; }
+  .topbar { padding-inline: 12px; gap: 8px; }
+  .brand { font-size: 20px; gap: 6px; }
+  .brand-mark { width: 28px; height: 28px; }
+  .topnav #guideNav { font-size: 8px; }
+  .panel-heading { padding-inline: 11px; }
+  .panel-title { gap: 5px; }
+  .status-text { display: none; }
+  .segmented button { padding-inline: 6px; }
+  .view-controls { gap: 5px; }
+  .run-button { min-width: 122px; }
+  .bordered { width: 30px; }
+  .metric strong { font-size: 24px; }
+  .metric-label { font-size: 9px; }
+  .canvas-legend { font-size: 8px; }
+}
+
+/* Phone landscape and short browser windows should not force a tall canvas. */
+@media (max-height: 700px) and (min-width: 651px) {
+  .intro { margin-bottom: 22px; }
+  .canvas-wrap { height: clamp(240px, 48dvh, 340px); }
+  .chart-wrap { height: 140px; }
+  .sidebar-bottom { padding-top: 25px; }
+}
+
+/* Fullscreen keeps its own flexible height instead of inheriting viewport rules. */
+#visualPanel:fullscreen .canvas-wrap { height: auto; min-height: 0; }
