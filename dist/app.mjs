@@ -1,31 +1,33 @@
-import {PROBLEMS, METHODS, FUNCTIONS, createProblem, defaults, Simulation} from './engine.mjs';
+import {PROBLEMS, METHODS, FUNCTIONS, ITERATION_LIMITS, createProblem, defaults, Simulation} from './engine.mjs';
+import {knapsackLayout,knapsackItemAt} from './knapsack-view.mjs';
 
 const $ = id => document.getElementById(id);
 const icon = (name,cls='') => `<svg class="icon ${cls}" aria-hidden="true"><use href="#i-${name}"/></svg>`;
 const fmt = (v,d=3) => Math.abs(v)<1e-7?'0':Number(v).toLocaleString('en-US',{maximumFractionDigits:d,minimumFractionDigits:Number.isInteger(v)?0:d});
 const clamp = (v,a,b) => Math.max(a,Math.min(b,v));
-const state = {type:'tsp', method:'sa', size:40, seed:42, variant:'rastrigin', colors:4, params:{}, speed:1, limit:2000, compare:false, compareMethod:'ga', view:'best', ghost:true, running:false};
+const state = {type:'tsp', method:'sa', size:40, seed:42, variant:'rastrigin', colors:4, params:{}, speed:1, limit:ITERATION_LIMITS.default, compare:false, compareMethod:'ga', view:'best', ghost:true, running:false};
 try {
   const saved = JSON.parse(localStorage.getItem('heuristic-lab-v1') || 'null');
   if(saved && PROBLEMS[saved.type] && METHODS[saved.method]?.problems.includes(saved.type)) {
     state.type=saved.type;state.method=saved.method;
     state.size=clamp(Math.round(Number(saved.size)||PROBLEMS[state.type].size),PROBLEMS[state.type].min||2,PROBLEMS[state.type].max||2);
     state.seed=clamp(Math.round(Number(saved.seed)||0),0,999999);state.variant=FUNCTIONS[saved.variant]?saved.variant:'rastrigin';state.colors=clamp(Math.round(Number(saved.colors)||4),3,6);
+    if(Number.isFinite(saved.limit))state.limit=clamp(Math.round(saved.limit),ITERATION_LIMITS.min,ITERATION_LIMITS.max);
     for(const [key,,min,max] of METHODS[state.method].params)if(Number.isFinite(saved.params?.[key]))state.params[key]=clamp(saved.params[key],min,max);
   }
 } catch {}
 state.params={...defaults(state.method,state.type),...state.params};
-let problem, sim, comparison, toastTimer, accumulator=0, lastTime=0, dragged=-1, heatmapCache=null, lastMetricTime=0;
+let problem, sim, comparison, toastTimer, accumulator=0, lastTime=0, dragged=-1, heatmapCache=null, lastMetricTime=0, lastDrawTime=0, itemLayout=null, inspectedItem=-1;
 const scene=$('scene'), ctx=scene.getContext('2d'), chart=$('chart'), chartCtx=chart.getContext('2d');
 
-function persist(){try{localStorage.setItem('heuristic-lab-v1',JSON.stringify({type:state.type,method:state.method,size:state.size,seed:state.seed,variant:state.variant,colors:state.colors,params:state.params}));}catch{}}
+function persist(){try{localStorage.setItem('heuristic-lab-v1',JSON.stringify({type:state.type,method:state.method,size:state.size,seed:state.seed,variant:state.variant,colors:state.colors,params:state.params,limit:state.limit}));}catch{}}
 function toast(message){$('toast').textContent=message;$('toast').classList.add('show');clearTimeout(toastTimer);toastTimer=setTimeout(()=>$('toast').classList.remove('show'),2600);}
 function pause(){state.running=false;accumulator=0;updateRunButton();}
 function reset({newProblem=false}={}) {
   pause();if(newProblem||!problem)problem=createProblem(state.type,state.size,state.seed,state.variant,state.colors);
   sim=new Simulation(problem,state.method,state.params,state.seed);
   comparison=state.compare?new Simulation(problem,state.compareMethod,{},state.seed):null;
-  heatmapCache=null;updateMetrics();draw();drawChart();persist();
+  heatmapCache=null;inspectedItem=-1;itemLayout=null;$('itemTooltip').hidden=true;updateMetrics();draw();drawChart();persist();
 }
 function updateRunButton(){
   $('runBtn').classList.toggle('running',state.running);
@@ -56,14 +58,18 @@ function renderUI(){
   $('insightTitle').textContent=insights[state.method][0];$('insightText').textContent=insights[state.method][1];
   $('parameters').innerHTML=m.params.filter(([key])=>key!=='stepSize'||state.type==='function').map(([key,label,min,max,step])=>`<div class="parameter"><div class="param-top"><label for="range-${key}">${label}</label><input class="param-value" aria-label="${label}の数値" id="value-${key}" data-key="${key}" type="number" min="${min}" max="${max}" step="${step}" value="${state.params[key]}"></div><input class="param-range" id="range-${key}" data-key="${key}" type="range" min="${min}" max="${max}" step="${step}" value="${state.params[key]}" style="--fill:${(state.params[key]-min)/(max-min)*100}%"><div class="range-labels"><span>${min}</span><span>${max}</span></div><p class="param-help">${help[key]}</p></div>`).join('');
   let settings='';
-  if(p.sizeLabel)settings+=`<div class="parameter"><div class="param-top"><label for="sizeRange">${p.sizeLabel}</label><span id="sizeValue" class="param-value">${state.size}</span></div><input id="sizeRange" class="param-range" type="range" min="${p.min}" max="${p.max}" step="${p.step}" value="${state.size}" style="--fill:${(state.size-p.min)/(p.max-p.min)*100}%"><div class="range-labels"><span>${p.min}</span><span>${p.max}</span></div></div>`;
+  if(p.sizeLabel)settings+=`<div class="parameter"><div class="param-top"><label for="${state.type==='knapsack'?'sizeInput':'sizeRange'}">${p.sizeLabel}</label>${state.type==='knapsack'?`<input id="sizeInput" class="param-value size-input" type="number" min="${p.min}" max="${p.max}" step="1" value="${state.size}" aria-label="品物数">`:`<span id="sizeValue" class="param-value">${state.size}</span>`}</div><input id="sizeRange" class="param-range" type="range" min="${p.min}" max="${p.max}" step="${p.step}" value="${state.size}" ${state.type==='knapsack'?'aria-label="品物数のスライダー"':''} style="--fill:${(state.size-p.min)/(p.max-p.min)*100}%"><div class="range-labels"><span>${fmt(p.min,0)}</span><span>${fmt(p.max,0)}</span></div>${state.type==='knapsack'?`<div class="size-presets" aria-label="品物数のプリセット">${[100,500,1000,5000,10000].map(n=>`<button type="button" data-size="${n}" aria-pressed="${state.size===n}">${fmt(n,0)}</button>`).join('')}</div>`:''}</div>`;
   if(state.type==='function')settings+=`<div class="field-row"><label for="functionSelect">目的関数</label><select id="functionSelect" class="wide-select">${Object.entries(FUNCTIONS).map(([k,f])=>`<option value="${k}" ${k===state.variant?'selected':''}>${f.name}</option>`).join('')}</select></div><p class="param-help">2変数を最小化します。既知の最小値は 0 です。</p>`;
   if(state.type==='coloring')settings+=`<div class="field-row"><label for="colorsSelect">使用する色数</label><select id="colorsSelect">${[3,4,5,6].map(n=>`<option value="${n}" ${n===state.colors?'selected':''}>${n} 色</option>`).join('')}</select></div><p class="param-help">指定色数で解けるグラフを生成します。</p>`;
-  if(state.type==='knapsack')settings+='<p class="param-help">容量は品物の総重量の35%。重量を超えた候補は品物を取り除いて修復します。</p>';
+  if(state.type==='knapsack')settings+='<p class="param-help">最大10,000個。容量は総重量の35%。細かい品物はカーソルを重ねるかタップすると詳細を確認できます。</p>';
   $('problemSettings').innerHTML=settings;$('seedInput').value=state.seed;
+  $('limitInput').min=ITERATION_LIMITS.min;$('limitInput').max=ITERATION_LIMITS.max;$('limitInput').value=state.limit;
+  $('iterationPresets').innerHTML=ITERATION_LIMITS.presets.map(n=>`<option value="${n}" label="${fmt(n,0)} 回"></option>`).join('');
   $('compareMethod').innerHTML=available.filter(([k])=>k!==state.method).map(([k,m])=>`<option value="${k}" ${k===state.compareMethod?'selected':''}>${m.short} · ${m.name}</option>`).join('');
   $('compareToggle').checked=state.compare;$('compareSettings').hidden=!state.compare;$('compareLegendWrap').hidden=!state.compare;$('compareLegend').textContent=METHODS[state.compareMethod].name;
   $('experimentNote').textContent=state.compare?'同じ問題・乱数シードで比較しています。1ステップの評価回数は手法ごとに異なるため、速度や性能の厳密な順位ではありません。':'小さな変化を重ねながら探索します。最良解は、これまでに見つけた一番よい解です。';
+  if(state.type==='knapsack')$('experimentNote').textContent+=' 品物はカーソルを重ねるかタップして詳細を確認できます。';
+  $('canvasWrap').classList.toggle('knapsack',state.type==='knapsack');
   $('canvasHint').hidden=state.type!=='tsp';
   $('primaryLegend').textContent={tsp:'最良の巡回路',function:'最良の位置',knapsack:'選択した品物',coloring:'彩色した頂点'}[state.type];
   $('secondaryLegend').textContent={tsp:'現在の巡回路',function:'探索中の粒子',knapsack:'選択していない品物',coloring:'同色でつながる辺'}[state.type];
@@ -73,10 +79,11 @@ function value(v){return state.type==='knapsack'?-v:v;}
 function updateMetrics(){
   const b=value(sim.bestScore),c=value(sim.currentScore),initial=value(sim.initial);
   $('bestValue').textContent=fmt(b);$('currentValue').textContent=fmt(c);$('iterationValue').textContent=fmt(sim.iteration,0);$('evaluationValue').textContent=fmt(sim.evaluations,0);$('iterationMax').textContent=`/ ${fmt(state.limit,0)}`;
+  for(const id of ['bestValue','currentValue','iterationValue','evaluationValue'])$(id).classList.toggle('long-number',$(id).textContent.length>=9);
   const improvement=state.type==='knapsack'?b-initial:initial-b;
   $('improvement').textContent=initial!==0?`${state.type==='knapsack'?'↑':'↓'} ${(Math.max(0,improvement)/Math.abs(initial)*100).toFixed(1)}%`:improvement>0?`+${fmt(improvement)}`:'';
   if(comparison)$('compareScore').textContent=`最良値 ${fmt(value(comparison.bestScore))} · ${fmt(comparison.evaluations,0)} 回評価`;
-  $('canvasBadge').textContent={tsp:`${state.size} CITIES`,function:FUNCTIONS[state.variant].name.toUpperCase(),knapsack:`${state.size} ITEMS`,coloring:`${state.size} NODES / ${state.colors} COLORS`}[state.type];
+  $('canvasBadge').textContent={tsp:`${state.size} CITIES`,function:FUNCTIONS[state.variant].name.toUpperCase(),knapsack:`${fmt(state.size,0)} ITEMS`,coloring:`${state.size} NODES / ${state.colors} COLORS`}[state.type];
   $('canvasSubBadge').textContent={tsp:'EUCLIDEAN DISTANCE · CLOSED TOUR',function:'2D LANDSCAPE · MINIMUM = 0',knapsack:`CAPACITY ${problem.capacity} · MAXIMIZE VALUE`,coloring:'MINIMIZE EDGE CONFLICTS'}[state.type];
   updateRunButton();
 }
@@ -120,14 +127,29 @@ function drawFunction(w,h){
 }
 function drawKnapsack(w,h){
   grid(ctx,w,h);const solution=state.view==='best'?sim.best:sim.current;
-  const cols=Math.max(5,Math.ceil(Math.sqrt(state.size*w/(h-100)))),rows=Math.ceil(state.size/cols),gap=6,tw=(w-46-gap*(cols-1))/cols,th=Math.min(56,(h-109-gap*(rows-1))/rows);
-  let weight=0;const top=20;
-  problem.items.forEach((item,i)=>{const x=23+(i%cols)*(tw+gap),y=top+Math.floor(i/cols)*(th+gap),selected=solution[i];if(selected)weight+=item.weight;
-    roundedRect(ctx,x,y,tw,th,5);ctx.fillStyle=selected?'#e1f0e8':'#fff';ctx.fill();ctx.strokeStyle=selected?'#8dbda6':'#dfe7e1';ctx.lineWidth=1;ctx.stroke();
-    ctx.fillStyle=selected?'#25795d':'#a2b0a7';ctx.font=`500 ${Math.min(13,tw*.24)}px "DM Sans", sans-serif`;ctx.textAlign='center';ctx.fillText(`${item.value}`,x+tw/2,y+th*.43);
-    ctx.font=`${Math.min(8,tw*.14)}px "DM Sans", sans-serif`;ctx.fillStyle=selected?'#7aa48d':'#b1bcb5';ctx.fillText(`${item.weight} kg`,x+tw/2,y+th*.76);if(selected&&tw>39){ctx.font='8px sans-serif';ctx.fillStyle='#5a9d7d';ctx.fillText('✓',x+tw-8,y+10);}});ctx.textAlign='left';
+  itemLayout=knapsackLayout(state.size,w,h);const {columns:cols,gap,cellWidth:tw,cellHeight:th,top,left}=itemLayout;
+  const detailed=tw>=27&&th>=26;let weight=0,selectedCount=0;
+  problem.items.forEach((item,i)=>{const x=left+(i%cols)*(tw+gap),y=top+Math.floor(i/cols)*(th+gap),selected=solution[i];if(selected){weight+=item.weight;selectedCount++;}
+    if(detailed){roundedRect(ctx,x,y,tw,th,Math.min(5,tw*.12,th*.12));ctx.fillStyle=selected?'#e1f0e8':'#fff';ctx.fill();ctx.strokeStyle=selected?'#8dbda6':'#dfe7e1';ctx.lineWidth=1;ctx.stroke();
+      ctx.fillStyle=selected?'#25795d':'#a2b0a7';ctx.font=`500 ${Math.min(13,tw*.24)}px "DM Sans", sans-serif`;ctx.textAlign='center';ctx.fillText(`${item.value}`,x+tw/2,y+th*.43);
+      ctx.font=`${Math.min(8,tw*.18)}px "DM Sans", sans-serif`;ctx.fillStyle=selected?'#7aa48d':'#b1bcb5';ctx.fillText(`${item.weight} kg`,x+tw/2,y+th*.76);if(selected&&tw>39){ctx.font='8px sans-serif';ctx.fillStyle='#5a9d7d';ctx.fillText('✓',x+tw-8,y+10);}
+    }else{ctx.fillStyle=selected?'#288f70':'#dce7df';ctx.fillRect(x,y,tw,th);}
+  });ctx.textAlign='left';
   const barY=h-65;roundedRect(ctx,23,barY,w-46,5,3);ctx.fillStyle='#e3eae4';ctx.fill();roundedRect(ctx,23,barY,(w-46)*weight/problem.capacity,5,3);ctx.fillStyle='#288f70';ctx.fill();
-  ctx.font='9px "DM Sans", sans-serif';ctx.fillStyle='#658776';ctx.fillText(`重量 ${weight} / ${problem.capacity} kg`,23,barY-9);ctx.textAlign='right';ctx.fillText(`${solution.filter(Boolean).length} 点を選択`,w-23,barY-9);ctx.textAlign='left';
+  ctx.font='9px "DM Sans", sans-serif';ctx.fillStyle='#658776';const weightText=`重量 ${fmt(weight,0)} / ${fmt(problem.capacity,0)} kg`,countText=`${fmt(selectedCount,0)} 点を選択`;
+  const countY=ctx.measureText(weightText).width+ctx.measureText(countText).width+12>w-46?barY+18:barY-9;
+  ctx.fillText(weightText,23,barY-9);ctx.textAlign='right';ctx.fillText(countText,w-23,countY);ctx.textAlign='left';updateItemTooltip();
+}
+function updateItemTooltip(){
+  if(state.type!=='knapsack'||inspectedItem<0)return;
+  const item=problem.items[inspectedItem],solution=state.view==='best'?sim.best:sim.current;
+  const text=`品物 #${fmt(inspectedItem+1,0)} · 価値 ${item.value} · 重量 ${item.weight} kg · ${solution[inspectedItem]?'選択中':'未選択'}`;
+  if($('itemTooltip').textContent!==text)$('itemTooltip').textContent=text;
+}
+function inspectKnapsack(e){
+  if(state.type!=='knapsack'||!itemLayout)return;const r=scene.getBoundingClientRect(),x=e.clientX-r.left,y=e.clientY-r.top;
+  inspectedItem=knapsackItemAt(itemLayout,x,y);const tooltip=$('itemTooltip');tooltip.hidden=inspectedItem<0;if(inspectedItem<0)return;
+  updateItemTooltip();tooltip.style.left=`${clamp(x+12,10,Math.max(10,r.width-tooltip.offsetWidth-10))}px`;tooltip.style.top=`${clamp(y-tooltip.offsetHeight-10,10,Math.max(10,r.height-tooltip.offsetHeight-10))}px`;
 }
 const nodeColors=['#479e83','#9d89c3','#d3aa62','#d48674','#6a9ec0','#b0939f'];
 function drawColoring(w,h){
@@ -150,9 +172,9 @@ function drawChart(){
     if(!index){const last=xy(hist.at(-1));c.lineTo(last[0],top+ph);c.lineTo(left,top+ph);c.closePath();const gradient=c.createLinearGradient(0,top,0,top+ph);gradient.addColorStop(0,'#19897013');gradient.addColorStop(1,'#19897002');c.fillStyle=gradient;c.fill();circle(c,last[0],last[1],3,'#198970','#fff',1.5);}});c.textAlign='left';
 }
 function advance(){if(sim.iteration>=state.limit)return;sim.step();comparison?.step();if(sim.iteration>=state.limit){pause();updateMetrics();toast('反復上限に到達しました。結果を保存したり、設定を変えて再実験できます。');}}
-function toggleRun(){if(state.running){pause();return;}if(sim.iteration>=state.limit)reset();state.running=true;lastTime=performance.now();accumulator=0;updateRunButton();}
+function toggleRun(){if(state.running){pause();updateMetrics();draw();drawChart();return;}if(sim.iteration>=state.limit)reset();state.running=true;lastTime=performance.now();accumulator=0;updateRunButton();}
 function frame(time){
-  if(state.running&&!document.hidden){const delta=Math.min((time-lastTime)/1000,.12);accumulator+=delta*30*state.speed;let count=0;const start=performance.now();while(accumulator>=1&&state.running&&count<80&&performance.now()-start<12){advance();accumulator--;count++;}if(count){draw();drawChart();if(time-lastMetricTime>80){updateMetrics();lastMetricTime=time;}}}
+  if(state.running&&!document.hidden){const delta=Math.min((time-lastTime)/1000,.12);if(state.speed==='fast')accumulator=5000;else accumulator=Math.min(5000,accumulator+delta*30*state.speed);let count=0;const start=performance.now();while(accumulator>=1&&state.running&&count<5000&&performance.now()-start<10){advance();accumulator--;count++;}if(count){if(time-lastDrawTime>=33||!state.running){draw();drawChart();lastDrawTime=time;}if(time-lastMetricTime>80){updateMetrics();lastMetricTime=time;}}}
   lastTime=time;requestAnimationFrame(frame);
 }
 function showDialog(html){$('dialogContent').innerHTML=html;$('infoDialog').showModal();}
@@ -164,7 +186,7 @@ function about(){showDialog('<h2 class="dialog-title">好奇心のための、�
 function shortcuts(){showDialog(`<h2 class="dialog-title">手を止めずに、探索する。</h2><p class="dialog-description">入力欄を操作していないときに使えます。</p>${[['Space','実行 / 一時停止'],['→','1ステップ進める'],['R','同じ問題でリセット'],['N','新しい問題を生成'],['?','このヘルプを開く'],['Esc','ダイアログを閉じる']].map(([k,v])=>`<div class="shortcut-row"><span>${v}</span><kbd>${k}</kbd></div>`).join('')}`);}
 function exportResults(){
   const {f,...p}=problem;
-  const data={format:'heuristic-lab-v1',exportedAt:new Date().toISOString(),problem:p,settings:{...state,running:undefined},primary:sim.snapshot(),comparison:comparison?.snapshot()||null,notes:'Scores are minimized; knapsack scores are negative values. History may be downsampled after 2400 records. Parameters may have been adjusted during the run.'};
+  const data={format:'heuristic-lab-v1',exportedAt:new Date().toISOString(),problem:p,settings:{...state,running:undefined},primary:sim.snapshot(),comparison:comparison?.snapshot()||null,notes:'Scores are minimized; knapsack scores are negative values. History is uniformly downsampled to at most 2400 records, preserving the initial and latest points. Parameters may have been adjusted during the run.'};
   const blob=new Blob([JSON.stringify(data,null,2)],{type:'application/json'}),url=URL.createObjectURL(blob),link=document.createElement('a');link.href=url;link.download=`heuristic-lab-${state.type}-${state.method}-seed${state.seed}.json`;link.click();setTimeout(()=>URL.revokeObjectURL(url),1000);toast('実験結果をJSONで保存しました');
 }
 
@@ -177,11 +199,16 @@ $('parameters').addEventListener('input',e=>{
   const range=$(`range-${key}`),input=$(`value-${key}`);range.value=v;range.style.setProperty('--fill',`${(v-param[2])/(param[3]-param[2])*100}%`);if(e.target!==input)input.value=v;persist();
 });
 $('parameters').addEventListener('change',e=>{const key=e.target.dataset.key;if(key)$(`value-${key}`).value=state.params[key];});
-$('problemSettings').addEventListener('input',e=>{if(e.target.id==='sizeRange'){$('sizeValue').textContent=e.target.value;e.target.style.setProperty('--fill',`${(e.target.value-PROBLEMS[state.type].min)/(PROBLEMS[state.type].max-PROBLEMS[state.type].min)*100}%`);}});
-$('problemSettings').addEventListener('change',e=>{if(e.target.id==='sizeRange')state.size=Number(e.target.value);else if(e.target.id==='functionSelect')state.variant=e.target.value;else if(e.target.id==='colorsSelect')state.colors=Number(e.target.value);else return;renderUI();reset({newProblem:true});});
+$('problemSettings').addEventListener('input',e=>{if(e.target.id==='sizeRange'){if($('sizeInput'))$('sizeInput').value=e.target.value;else $('sizeValue').textContent=e.target.value;e.target.style.setProperty('--fill',`${(e.target.value-PROBLEMS[state.type].min)/(PROBLEMS[state.type].max-PROBLEMS[state.type].min)*100}%`);}});
+function setProblemSize(value){const p=PROBLEMS[state.type],n=Number(value);state.size=Number.isFinite(n)&&value!==''?clamp(Math.round(n),p.min,p.max):state.size;renderUI();reset({newProblem:true});}
+$('problemSettings').addEventListener('change',e=>{if(e.target.id==='sizeRange'||e.target.id==='sizeInput'){setProblemSize(e.target.value);return;}if(e.target.id==='functionSelect')state.variant=e.target.value;else if(e.target.id==='colorsSelect')state.colors=Number(e.target.value);else return;renderUI();reset({newProblem:true});});
+$('problemSettings').addEventListener('click',e=>{const button=e.target.closest('[data-size]');if(button)setProblemSize(button.dataset.size);});
+$('problemSettings').addEventListener('keydown',e=>{if(e.key==='Enter'&&e.target.id==='sizeInput'){e.preventDefault();setProblemSize(e.target.value);}});
 $('seedInput').addEventListener('change',e=>{state.seed=clamp(Math.round(Number(e.target.value)||0),0,999999);e.target.value=state.seed;reset({newProblem:true});});
-$('limitInput').addEventListener('change',e=>{state.limit=Number(e.target.value);if(sim.iteration>=state.limit)pause();updateMetrics();});
-$('speed').addEventListener('change',e=>state.speed=Number(e.target.value));
+function setIterationLimit(value){const n=Number(value);if(value!==''&&Number.isFinite(n))state.limit=clamp(Math.round(n),ITERATION_LIMITS.min,ITERATION_LIMITS.max);$('limitInput').value=state.limit;if(sim.iteration>=state.limit)pause();updateMetrics();if(!state.running){draw();drawChart();}persist();}
+$('limitInput').addEventListener('change',e=>setIterationLimit(e.target.value));
+$('limitInput').addEventListener('keydown',e=>{if(e.key==='Enter'){e.preventDefault();setIterationLimit(e.target.value);e.target.blur();}});
+$('speed').addEventListener('change',e=>{state.speed=e.target.value==='fast'?'fast':Number(e.target.value);accumulator=0;});
 $('runBtn').addEventListener('click',toggleRun);
 $('quickRun').addEventListener('click',toggleRun);
 $('stepBtn').addEventListener('click',()=>{advance();updateMetrics();draw();drawChart();});
@@ -211,6 +238,9 @@ scene.addEventListener('pointerdown',e=>{
 scene.addEventListener('pointermove',e=>{if(dragged<0)return;const r=scene.getBoundingClientRect();problem.points[dragged]=[clamp((e.clientX-r.left-30)/(r.width-60),.02,.98),clamp((e.clientY-r.top-26)/(r.height-85),.02,.98)];draw();});
 function finishDrag(){if(dragged<0)return;dragged=-1;scene.style.cursor='';problem.dist=problem.points.map(a=>problem.points.map(b=>Math.hypot(a[0]-b[0],a[1]-b[1])));reset();toast('都市の位置を更新し、探索をリセットしました');}
 scene.addEventListener('pointerup',finishDrag);scene.addEventListener('pointercancel',finishDrag);
+scene.addEventListener('pointerdown',inspectKnapsack);
+scene.addEventListener('pointermove',e=>{if(e.pointerType==='mouse')inspectKnapsack(e);});
+scene.addEventListener('pointerleave',e=>{if(e.pointerType==='mouse'){inspectedItem=-1;$('itemTooltip').hidden=true;}});
 document.addEventListener('visibilitychange',()=>{lastTime=performance.now();accumulator=0;});
 const observer=new ResizeObserver(()=>{draw();drawChart();});observer.observe($('canvasWrap'));observer.observe(chart.parentElement);
 ensureComparison();renderUI();reset({newProblem:true});requestAnimationFrame(frame);

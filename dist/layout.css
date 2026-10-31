@@ -263,3 +263,38 @@ main {
 
 /* Fullscreen keeps its own flexible height instead of inheriting viewport rules. */
 #visualPanel:fullscreen .canvas-wrap { height: auto; min-height: 0; }
+
+.size-input { width: 86px; max-width: 100px; }
+.size-presets { display: flex; flex-wrap: wrap; gap: 5px; margin-top: 13px; }
+.size-presets button {
+  flex: 1 1 auto;
+  padding: 5px 7px;
+  border: 1px solid #e3ebe6;
+  border-radius: 4px;
+  background: #f8faf9;
+  color: #7b9386;
+  font-size: 9px;
+}
+.size-presets button:hover,
+.size-presets button[aria-pressed="true"] { background: var(--green-light); border-color: #abd0be; color: var(--green-dark); }
+.speed-control select { width: 74px; }
+.canvas-wrap.knapsack { touch-action: pan-y; }
+.canvas-wrap.knapsack canvas { cursor: crosshair; }
+.item-tooltip {
+  position: absolute;
+  z-index: 2;
+  pointer-events: none;
+  width: max-content;
+  max-width: calc(100% - 20px);
+  padding: 8px 11px;
+  border: 1px solid #d5e4db;
+  border-radius: 6px;
+  background: #fffffff5;
+  box-shadow: 0 3px 14px #234c3220;
+  color: #426952;
+  font-size: 10px;
+  line-height: 1.7;
+}
+.metric strong.long-number { font-size: 20px; }
+@media (min-width: 1600px) { .size-presets button { font-size: 11px; } .metric strong.long-number { font-size: 30px; } }
+@media (max-width: 650px) { .speed-control select { width: 69px; } }

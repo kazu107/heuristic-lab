@@ -24,9 +24,10 @@ export const METHODS = {
 export const PROBLEMS = {
   tsp:{name:'巡回セールスマン',en:'Traveling Salesman',tag:'経路最適化',icon:'route',unit:'総移動距離',direction:'min',description:'すべての都市を一度ずつ訪れ、出発点に戻る。最も短い巡回路を探します。',sizeLabel:'都市数',min:10,max:100,step:5,size:40},
   function:{name:'関数最適化',en:'Function Optimization',tag:'連続最適化',icon:'landscape',unit:'目的関数値',direction:'min',description:'起伏のある地形を探索して、関数が最小になる座標を見つけます。',sizeLabel:null,size:2},
-  knapsack:{name:'ナップサック',en:'0/1 Knapsack',tag:'組合せ最適化',icon:'bag',unit:'合計価値',direction:'max',description:'重さの制限の中で、価値の合計が最大になる品物の組合せを探します。',sizeLabel:'品物数',min:10,max:70,step:5,size:30},
+  knapsack:{name:'ナップサック',en:'0/1 Knapsack',tag:'組合せ最適化',icon:'bag',unit:'合計価値',direction:'max',description:'重さの制限の中で、価値の合計が最大になる品物の組合せを探します。',sizeLabel:'品物数',min:10,max:10000,step:1,size:30},
   coloring:{name:'グラフ彩色',en:'Graph Coloring',tag:'制約充足',icon:'network',unit:'色の衝突数',direction:'min',description:'隣り合う頂点が同じ色にならないように、指定した色数で塗り分けます。',sizeLabel:'頂点数',min:10,max:50,step:2,size:24}
 };
+export const ITERATION_LIMITS = {min:1,max:1000000,default:2000,presets:[500,2000,10000,100000,1000000]};
 export function createProblem(type, size=PROBLEMS[type].size, seed=42, variant='rastrigin', colors=4) {
   const rng=random(seed), p={type,size,seed,variant,colors};
   if(type==='tsp') {
@@ -45,12 +46,18 @@ export function createProblem(type, size=PROBLEMS[type].size, seed=42, variant='
 export function objective(p,x) {
   if(p.type==='tsp')return x.reduce((s,a,i)=>s+p.dist[a][x[(i+1)%x.length]],0);
   if(p.type==='function')return p.f(x[0],x[1]);
-  if(p.type==='knapsack'){let w=0,v=0;x.forEach((a,i)=>{if(a){w+=p.items[i].weight;v+=p.items[i].value;}});return w>p.capacity?10000+(w-p.capacity)*100:-v;}
+  if(p.type==='knapsack'){let w=0,v=0;for(let i=0;i<x.length;i++)if(x[i]){w+=p.items[i].weight;v+=p.items[i].value;}return w>p.capacity?10000+(w-p.capacity)*100:-v;}
   return p.edges.reduce((s,[a,b])=>s+(x[a]===x[b]?1:0),0);
 }
 function repair(p,x,rng) {
   if(p.type==='function')return x.map(v=>clamp(v,-p.range,p.range));
-  if(p.type==='knapsack') {let w=x.reduce((s,b,i)=>s+b*p.items[i].weight,0);const selected=shuffle(x.flatMap((b,i)=>b?[i]:[]),rng);while(w>p.capacity&&selected.length){const i=selected.pop();x[i]=0;w-=p.items[i].weight;}}
+  if(p.type==='knapsack') {
+    let w=0;for(let i=0;i<x.length;i++)if(x[i])w+=p.items[i].weight;
+    if(w<=p.capacity)return x;
+    const selected=[];for(let i=0;i<x.length;i++)if(x[i])selected.push(i);
+    // Draw without replacement only until feasible; avoid shuffling a large valid solution.
+    while(w>p.capacity&&selected.length){const j=Math.floor(rng()*selected.length),i=selected[j];selected[j]=selected[selected.length-1];selected.pop();x[i]=0;w-=p.items[i].weight;}
+  }
   return x;
 }
 function candidate(p,rng) {
@@ -82,7 +89,7 @@ export function defaults(method,type) {
 export class Simulation {
   constructor(problem,method,params={},seed=42){
     if(!METHODS[method]?.problems.includes(problem.type))throw new Error('Unsupported problem/method combination');
-    this.problem=problem;this.method=method;this.params={...defaults(method,problem.type),...params};this.rng=random((Number(seed)+104729)>>>0);this.iteration=0;this.evaluations=0;this.accepted=0;this.bestScore=Infinity;this.history=[];this.trail=[];
+    this.problem=problem;this.method=method;this.params={...defaults(method,problem.type),...params};this.rng=random((Number(seed)+104729)>>>0);this.iteration=0;this.evaluations=0;this.accepted=0;this.bestScore=Infinity;this.history=[];this.historyStride=1;this.trail=[];
     this.current=candidate(problem,this.rng);this.currentScore=this.evaluate(this.current);this.initial=this.currentScore;
     this.population=[];
     if(['ga','pso','de'].includes(method))this.resizePopulation();
@@ -125,6 +132,11 @@ export class Simulation {
     }
     this.iteration++;if(p.type==='function'){this.trail.push(copy(this.current));if(this.trail.length>120)this.trail.shift();}this.record();return this.bestScore;
   }
-  record(){this.history.push({iteration:this.iteration,evaluations:this.evaluations,best:this.bestScore,current:this.currentScore});if(this.history.length>2400)this.history.splice(1,1);}
-  snapshot(){return {method:this.method,params:{...this.params},iterations:this.iteration,evaluations:this.evaluations,bestScore:this.bestScore,bestSolution:copy(this.best),history:this.history.map(h=>({...h}))};}
+  record(){
+    // Preserve samples across the whole run plus an always-current endpoint.
+    const last=this.history.at(-1);if(last&&last.iteration%this.historyStride!==0)this.history.pop();
+    this.history.push({iteration:this.iteration,evaluations:this.evaluations,best:this.bestScore,current:this.currentScore});
+    if(this.history.length>2400){this.historyStride*=2;this.history=this.history.filter(h=>h.iteration%this.historyStride===0||h.iteration===this.iteration);}
+  }
+  snapshot(){return {method:this.method,params:{...this.params},iterations:this.iteration,evaluations:this.evaluations,bestScore:this.bestScore,bestSolution:copy(this.best),historySampleStride:this.historyStride,history:this.history.map(h=>({...h}))};}
 }

@@ -1,6 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import {createProblem,objective,Simulation,METHODS,FUNCTIONS,random} from '../dist/engine.mjs';
+import {createProblem,objective,Simulation,METHODS,FUNCTIONS,PROBLEMS,ITERATION_LIMITS,random} from '../dist/engine.mjs';
+import {knapsackLayout,knapsackItemAt} from '../dist/knapsack-view.mjs';
 
 test('known objective values and planted coloring',()=>{
   const tsp={type:'tsp',dist:[[0,1,Math.SQRT2,1],[1,0,1,Math.SQRT2],[Math.SQRT2,1,0,1],[1,Math.SQRT2,1,0]]};
@@ -53,4 +54,45 @@ test('seeded RNG, data generation, evaluation count, and unsupported combination
   assert.notDeepEqual(createProblem('tsp',20,42).points,createProblem('tsp',20,43).points);
   const sim=new Simulation(createProblem('tsp',10,42),'sa');assert.equal(sim.evaluations,1);sim.step();assert.equal(sim.evaluations,2);
   assert.throws(()=>new Simulation(createProblem('tsp',10,42),'pso'));
+});
+
+for(const method of ['sa','ga','hill'])test(`10,000-item knapsack/${method}: capacity and value remain correct`,()=>{
+  const p=createProblem('knapsack',PROBLEMS.knapsack.max,42),sim=new Simulation(p,method,{},42);
+  let best=sim.bestScore;
+  for(let i=0;i<40;i++){sim.step();assert.ok(sim.bestScore<=best);best=sim.bestScore;}
+  for(const solution of [sim.best,sim.current,...sim.population.map(a=>a.x)]){
+    assert.equal(solution.length,10000);assert.ok(solution.every(bit=>bit===0||bit===1));
+    const totals=solution.reduce((a,bit,i)=>({weight:a.weight+bit*p.items[i].weight,value:a.value+bit*p.items[i].value}),{weight:0,value:0});
+    assert.ok(totals.weight<=p.capacity);assert.equal(objective(p,solution),-totals.value);
+  }
+});
+
+test('one million steps preserve a bounded full-run history and exact endpoint',()=>{
+  const sim=new Simulation(createProblem('function',2,42,'sphere'),'hill',{},42);
+  for(let i=0;i<ITERATION_LIMITS.max;i++)sim.step();
+  assert.equal(sim.iteration,1000000);assert.equal(sim.evaluations,1000001);
+  assert.ok(sim.history.length<=2400);assert.equal(sim.history[0].iteration,0);
+  assert.ok(sim.history.some(h=>h.iteration>0&&h.iteration<250000));
+  assert.ok(sim.history.some(h=>h.iteration>400000&&h.iteration<600000));
+  const endpoint=sim.history.at(-1);assert.equal(endpoint.iteration,1000000);assert.equal(endpoint.best,sim.bestScore);assert.equal(endpoint.evaluations,sim.evaluations);
+  assert.ok(sim.history.every((h,i)=>i===0||h.iteration>sim.history[i-1].iteration));
+  assert.ok(sim.history.every((h,i)=>i===0||h.best<=sim.history[i-1].best));
+  sim.step();assert.equal(sim.history.at(-1).iteration,1000001);
+});
+
+test('dense item grids fit mobile and desktop and inspect every item correctly',()=>{
+  for(const count of [10,30,70,500,1000,5000,10000])for(const [width,height] of [[250,270],[650,310],[1250,750]]){
+    const layout=knapsackLayout(count,width,height);
+    assert.ok(layout.cellWidth>0&&layout.cellHeight>0);
+    assert.ok(layout.left+layout.columns*(layout.cellWidth+layout.gap)-layout.gap<=width-22.9);
+    assert.ok(layout.top+layout.rows*(layout.cellHeight+layout.gap)-layout.gap<=height-88.9);
+    for(let i=0;i<count;i++){
+      const x=layout.left+(i%layout.columns)*(layout.cellWidth+layout.gap)+layout.cellWidth/2;
+      const y=layout.top+Math.floor(i/layout.columns)*(layout.cellHeight+layout.gap)+layout.cellHeight/2;
+      assert.equal(knapsackItemAt(layout,x,y),i);
+    }
+    assert.equal(knapsackItemAt(layout,0,0),-1);
+    assert.equal(knapsackItemAt(layout,width,height),-1);
+    assert.equal(knapsackItemAt(layout,layout.left+layout.cellWidth+layout.gap/2,layout.top+1),-1);
+  }
 });
