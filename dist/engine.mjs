@@ -25,20 +25,33 @@ export const PROBLEMS = {
   tsp:{name:'巡回セールスマン',en:'Traveling Salesman',tag:'経路最適化',icon:'route',unit:'総移動距離',direction:'min',description:'すべての都市を一度ずつ訪れ、出発点に戻る。最も短い巡回路を探します。',sizeLabel:'都市数',min:10,max:100,step:5,size:40},
   function:{name:'関数最適化',en:'Function Optimization',tag:'連続最適化',icon:'landscape',unit:'目的関数値',direction:'min',description:'起伏のある地形を探索して、関数が最小になる座標を見つけます。',sizeLabel:null,size:2},
   knapsack:{name:'ナップサック',en:'0/1 Knapsack',tag:'組合せ最適化',icon:'bag',unit:'合計価値',direction:'max',description:'重さの制限の中で、価値の合計が最大になる品物の組合せを探します。',sizeLabel:'品物数',min:10,max:10000,step:1,size:30},
-  coloring:{name:'グラフ彩色',en:'Graph Coloring',tag:'制約充足',icon:'network',unit:'色の衝突数',direction:'min',description:'隣り合う頂点が同じ色にならないように、指定した色数で塗り分けます。',sizeLabel:'頂点数',min:10,max:50,step:2,size:24}
+  coloring:{name:'グラフ彩色',en:'Graph Coloring',tag:'制約充足',icon:'network',unit:'色の衝突数',direction:'min',description:'隣り合う頂点が同じ色にならないように、指定した色数で塗り分けます。',sizeLabel:'頂点数',min:10,max:150,step:2,size:60,colors:3}
 };
 export const ITERATION_LIMITS = {min:1,max:1000000,default:2000,presets:[500,2000,10000,100000,1000000]};
-export function createProblem(type, size=PROBLEMS[type].size, seed=42, variant='rastrigin', colors=4) {
+export const GRAPH_CONNECTIONS = {sparse:{name:'少なめ',rate:.22},standard:{name:'標準',rate:.42},dense:{name:'多め',rate:.62}};
+export function createProblem(type, size=PROBLEMS[type].size, seed=42, variant='rastrigin', colors=PROBLEMS.coloring.colors, options={}) {
   const rng=random(seed), p={type,size,seed,variant,colors};
   if(type==='tsp') {
     p.points=Array.from({length:size},()=>[.05+.9*rng(),.05+.9*rng()]);
     p.dist=Array.from({length:size},(_,a)=>Array.from({length:size},(_,b)=>Math.hypot(p.points[a][0]-p.points[b][0],p.points[a][1]-p.points[b][1])));
-  } else if(type==='function') Object.assign(p,FUNCTIONS[variant]);
+  } else if(type==='function') {
+    const base=FUNCTIONS[variant];Object.assign(p,base);
+    p.functionLayout=options.functionLayout==='classic'?'classic':'shifted';
+    if(p.functionLayout==='shifted'){
+      const r=random(Number(seed)+4567),angle=r()*Math.PI*2,c=Math.cos(angle),s=Math.sin(angle),offset=[(r()-.5)*.7*p.range,(r()-.5)*.7*p.range];
+      p.coordinateTransform={angle,offset};p.baseFormula=base.formula;
+      p.formula=`${base.name}(u, v), (u, v) = R(−angle) × ((x, y) − offset)`;
+      p.f=(x,y)=>{const dx=x-offset[0],dy=y-offset[1];return base.f(c*dx+s*dy,-s*dx+c*dy);};
+      p.optimum=[offset[0]+c*base.optimum[0]-s*base.optimum[1],offset[1]+s*base.optimum[0]+c*base.optimum[1]];
+    }
+  }
   else if(type==='knapsack') {p.items=Array.from({length:size},()=>({weight:2+Math.floor(rng()*19),value:5+Math.floor(rng()*96)}));p.capacity=Math.round(p.items.reduce((s,i)=>s+i.weight,0)*.35);}
   else if(type==='coloring') {
     // A planted k-partite graph guarantees a feasible coloring with k colors.
     p.groups=shuffle(Array.from({length:size},(_,i)=>i%colors),rng);p.edges=[];
-    for(let i=0;i<size;i++)for(let j=i+1;j<size;j++)if(p.groups[i]!==p.groups[j]&&rng()<.22)p.edges.push([i,j]);
+    p.graphConnections=GRAPH_CONNECTIONS[options.graphConnections]?options.graphConnections:'standard';
+    p.connectionRate=GRAPH_CONNECTIONS[p.graphConnections].rate;const edgeRng=random(Number(seed)+9127);
+    for(let i=0;i<size;i++)for(let j=i+1;j<size;j++)if(p.groups[i]!==p.groups[j]&&edgeRng()<p.connectionRate)p.edges.push([i,j]);
     p.points=Array.from({length:size},(_,i)=>{const t=i/size*Math.PI*2;return [.5+.38*Math.cos(t),.5+.38*Math.sin(t)];});
   } else throw new Error('Unknown problem');
   return p;
@@ -84,6 +97,12 @@ function crossover(p,a,b,rng) {
 export function defaults(method,type) {
   const params=Object.fromEntries(METHODS[method].params.map(a=>[a[0],a[5]]));
   if(method==='sa')params.temperature={tsp:.3,function:12,knapsack:30,coloring:3}[type];
+  if(type==='function')Object.assign(params,{
+    pso:{population:20,inertia:.88,cognitive:1.2,social:.85},
+    ga:{population:32,mutation:.5,crossover:.8},
+    de:{population:24,differential:1.1,crossover:.5}
+  }[method]);
+  if(type==='coloring')Object.assign(params,{sa:{cooling:.999},ga:{population:30,mutation:.35,crossover:.8}}[method]);
   return params;
 }
 export class Simulation {

@@ -1,30 +1,42 @@
-import {PROBLEMS, METHODS, FUNCTIONS, ITERATION_LIMITS, createProblem, defaults, Simulation} from './engine.mjs';
+import {PROBLEMS, METHODS, FUNCTIONS, GRAPH_CONNECTIONS, ITERATION_LIMITS, createProblem, defaults, Simulation} from './engine.mjs';
 import {knapsackLayout,knapsackItemAt} from './knapsack-view.mjs';
 
 const $ = id => document.getElementById(id);
 const icon = (name,cls='') => `<svg class="icon ${cls}" aria-hidden="true"><use href="#i-${name}"/></svg>`;
 const fmt = (v,d=3) => Math.abs(v)<1e-7?'0':Number(v).toLocaleString('en-US',{maximumFractionDigits:d,minimumFractionDigits:Number.isInteger(v)?0:d});
+const scoreText = v => state.type==='function'&&v>0&&v<.01?v.toExponential(2):fmt(v);
 const clamp = (v,a,b) => Math.max(a,Math.min(b,v));
-const state = {type:'tsp', method:'sa', size:40, seed:42, variant:'rastrigin', colors:4, params:{}, speed:1, limit:ITERATION_LIMITS.default, compare:false, compareMethod:'ga', view:'best', ghost:true, running:false};
+const state = {type:'tsp', method:'sa', size:40, seed:42, variant:'rastrigin', colors:PROBLEMS.coloring.colors, functionLayout:'shifted',graphConnections:'standard',params:{}, speed:1, limit:ITERATION_LIMITS.default, compare:false, compareMethod:'ga', view:'best', ghost:true, running:false};
 try {
   const saved = JSON.parse(localStorage.getItem('heuristic-lab-v1') || 'null');
   if(saved && PROBLEMS[saved.type] && METHODS[saved.method]?.problems.includes(saved.type)) {
     state.type=saved.type;state.method=saved.method;
     state.size=clamp(Math.round(Number(saved.size)||PROBLEMS[state.type].size),PROBLEMS[state.type].min||2,PROBLEMS[state.type].max||2);
     state.seed=clamp(Math.round(Number(saved.seed)||0),0,999999);state.variant=FUNCTIONS[saved.variant]?saved.variant:'rastrigin';state.colors=clamp(Math.round(Number(saved.colors)||4),3,6);
+    state.functionLayout=saved.functionLayout==='classic'?'classic':'shifted';state.graphConnections=GRAPH_CONNECTIONS[saved.graphConnections]?saved.graphConnections:'standard';
     if(Number.isFinite(saved.limit))state.limit=clamp(Math.round(saved.limit),ITERATION_LIMITS.min,ITERATION_LIMITS.max);
     for(const [key,,min,max] of METHODS[state.method].params)if(Number.isFinite(saved.params?.[key]))state.params[key]=clamp(saved.params[key],min,max);
+    if(!saved.observationVersion){
+      if(saved.colors===4)state.colors=PROBLEMS.coloring.colors;
+      if(state.type==='coloring'&&saved.size===24)state.size=PROBLEMS.coloring.size;
+      if(['function','coloring'].includes(state.type)){
+        const legacy=Object.fromEntries(METHODS[state.method].params.map(a=>[a[0],a[5]]));
+        if(state.method==='sa')legacy.temperature=state.type==='function'?12:3;
+        if(Object.entries(legacy).every(([key,v])=>saved.params?.[key]===v))state.params={};
+      }
+    }
   }
 } catch {}
 state.params={...defaults(state.method,state.type),...state.params};
-let problem, sim, comparison, toastTimer, accumulator=0, lastTime=0, dragged=-1, heatmapCache=null, lastMetricTime=0, lastDrawTime=0, itemLayout=null, inspectedItem=-1;
+let problem, sim, comparison, toastTimer, accumulator=0, lastTime=0, dragged=-1, heatmapCache=null, lastMetricTime=0, lastDrawTime=0, itemLayout=null, inspectedItem=-1, speedCustomized=false;
 const scene=$('scene'), ctx=scene.getContext('2d'), chart=$('chart'), chartCtx=chart.getContext('2d');
 
-function persist(){try{localStorage.setItem('heuristic-lab-v1',JSON.stringify({type:state.type,method:state.method,size:state.size,seed:state.seed,variant:state.variant,colors:state.colors,params:state.params,limit:state.limit}));}catch{}}
+function persist(){try{localStorage.setItem('heuristic-lab-v1',JSON.stringify({type:state.type,method:state.method,size:state.size,seed:state.seed,variant:state.variant,colors:state.colors,functionLayout:state.functionLayout,graphConnections:state.graphConnections,observationVersion:1,params:state.params,limit:state.limit}));}catch{}}
+function applyProblemPace(){if(!speedCustomized)state.speed=['function','coloring'].includes(state.type) ? .5 : 1;$('speed').value=String(state.speed);}
 function toast(message){$('toast').textContent=message;$('toast').classList.add('show');clearTimeout(toastTimer);toastTimer=setTimeout(()=>$('toast').classList.remove('show'),2600);}
 function pause(){state.running=false;accumulator=0;updateRunButton();}
 function reset({newProblem=false}={}) {
-  pause();if(newProblem||!problem)problem=createProblem(state.type,state.size,state.seed,state.variant,state.colors);
+  pause();if(newProblem||!problem)problem=createProblem(state.type,state.size,state.seed,state.variant,state.colors,{functionLayout:state.functionLayout,graphConnections:state.graphConnections});
   sim=new Simulation(problem,state.method,state.params,state.seed);
   comparison=state.compare?new Simulation(problem,state.compareMethod,{},state.seed):null;
   heatmapCache=null;inspectedItem=-1;itemLayout=null;$('itemTooltip').hidden=true;updateMetrics();draw();drawChart();persist();
@@ -39,7 +51,7 @@ function updateRunButton(){
 function changeProblem(type){
   state.type=type;state.size=PROBLEMS[type].size;
   if(!METHODS[state.method].problems.includes(type))state.method=type==='function'?'pso':'sa';
-  state.params=defaults(state.method,type);ensureComparison();renderUI();reset({newProblem:true});$('sidebar').classList.remove('open');
+  state.params=defaults(state.method,type);applyProblemPace();ensureComparison();renderUI();reset({newProblem:true});$('sidebar').classList.remove('open');
 }
 function changeMethod(method){state.method=method;state.params=defaults(method,state.type);ensureComparison();renderUI();reset();$('sidebar').classList.remove('open');}
 function ensureComparison(){if(state.compareMethod===state.method||!METHODS[state.compareMethod].problems.includes(state.type))state.compareMethod=Object.keys(METHODS).find(m=>m!==state.method&&METHODS[m].problems.includes(state.type));}
@@ -59,8 +71,8 @@ function renderUI(){
   $('parameters').innerHTML=m.params.filter(([key])=>key!=='stepSize'||state.type==='function').map(([key,label,min,max,step])=>`<div class="parameter"><div class="param-top"><label for="range-${key}">${label}</label><input class="param-value" aria-label="${label}の数値" id="value-${key}" data-key="${key}" type="number" min="${min}" max="${max}" step="${step}" value="${state.params[key]}"></div><input class="param-range" id="range-${key}" data-key="${key}" type="range" min="${min}" max="${max}" step="${step}" value="${state.params[key]}" style="--fill:${(state.params[key]-min)/(max-min)*100}%"><div class="range-labels"><span>${min}</span><span>${max}</span></div><p class="param-help">${help[key]}</p></div>`).join('');
   let settings='';
   if(p.sizeLabel)settings+=`<div class="parameter"><div class="param-top"><label for="${state.type==='knapsack'?'sizeInput':'sizeRange'}">${p.sizeLabel}</label>${state.type==='knapsack'?`<input id="sizeInput" class="param-value size-input" type="number" min="${p.min}" max="${p.max}" step="1" value="${state.size}" aria-label="品物数">`:`<span id="sizeValue" class="param-value">${state.size}</span>`}</div><input id="sizeRange" class="param-range" type="range" min="${p.min}" max="${p.max}" step="${p.step}" value="${state.size}" ${state.type==='knapsack'?'aria-label="品物数のスライダー"':''} style="--fill:${(state.size-p.min)/(p.max-p.min)*100}%"><div class="range-labels"><span>${fmt(p.min,0)}</span><span>${fmt(p.max,0)}</span></div>${state.type==='knapsack'?`<div class="size-presets" aria-label="品物数のプリセット">${[100,500,1000,5000,10000].map(n=>`<button type="button" data-size="${n}" aria-pressed="${state.size===n}">${fmt(n,0)}</button>`).join('')}</div>`:''}</div>`;
-  if(state.type==='function')settings+=`<div class="field-row"><label for="functionSelect">目的関数</label><select id="functionSelect" class="wide-select">${Object.entries(FUNCTIONS).map(([k,f])=>`<option value="${k}" ${k===state.variant?'selected':''}>${f.name}</option>`).join('')}</select></div><p class="param-help">2変数を最小化します。既知の最小値は 0 です。</p>`;
-  if(state.type==='coloring')settings+=`<div class="field-row"><label for="colorsSelect">使用する色数</label><select id="colorsSelect">${[3,4,5,6].map(n=>`<option value="${n}" ${n===state.colors?'selected':''}>${n} 色</option>`).join('')}</select></div><p class="param-help">指定色数で解けるグラフを生成します。</p>`;
+  if(state.type==='function')settings+=`<div class="field-row"><label for="functionSelect">目的関数</label><select id="functionSelect" class="wide-select">${Object.entries(FUNCTIONS).map(([k,f])=>`<option value="${k}" ${k===state.variant?'selected':''}>${f.name}</option>`).join('')}</select></div><div class="field-row"><label for="functionLayout">地形の配置</label><select id="functionLayout" class="wide-select"><option value="shifted" ${state.functionLayout==='shifted'?'selected':''}>シードで変化</option><option value="classic" ${state.functionLayout==='classic'?'selected':''}>元の配置</option></select></div><p class="param-help">2変数を最小化します。最小値は0です。${state.functionLayout==='shifted'?'地形を回転・平行移動し、中央に集まるだけでは解けない配置にします。':'元の関数の配置で探索します。'}${state.variant==='sphere'?' Sphereは入門向けです。山谷の多いRastriginも試してみましょう。':''}</p>`;
+  if(state.type==='coloring')settings+=`<div class="field-row"><label for="colorsSelect">使用する色数</label><select id="colorsSelect">${[3,4,5,6].map(n=>`<option value="${n}" ${n===state.colors?'selected':''}>${n} 色</option>`).join('')}</select></div><div class="field-row"><label for="graphConnections">接続の多さ</label><select id="graphConnections">${Object.entries(GRAPH_CONNECTIONS).map(([key,g])=>`<option value="${key}" ${state.graphConnections===key?'selected':''}>${g.name}</option>`).join('')}</select></div><p class="param-help">指定色数で解けるグラフを生成します。接続の多さを変えて制約の強さを比べられます。</p>`;
   if(state.type==='knapsack')settings+='<p class="param-help">最大10,000個。容量は総重量の35%。細かい品物はカーソルを重ねるかタップすると詳細を確認できます。</p>';
   $('problemSettings').innerHTML=settings;$('seedInput').value=state.seed;
   $('limitInput').min=ITERATION_LIMITS.min;$('limitInput').max=ITERATION_LIMITS.max;$('limitInput').value=state.limit;
@@ -69,6 +81,7 @@ function renderUI(){
   $('compareToggle').checked=state.compare;$('compareSettings').hidden=!state.compare;$('compareLegendWrap').hidden=!state.compare;$('compareLegend').textContent=METHODS[state.compareMethod].name;
   $('experimentNote').textContent=state.compare?'同じ問題・乱数シードで比較しています。1ステップの評価回数は手法ごとに異なるため、速度や性能の厳密な順位ではありません。':'小さな変化を重ねながら探索します。最良解は、これまでに見つけた一番よい解です。';
   if(state.type==='knapsack')$('experimentNote').textContent+=' 品物はカーソルを重ねるかタップして詳細を確認できます。';
+  if(state.type==='function'&&state.functionLayout==='shifted')$('experimentNote').textContent+=' 地形の向きと最小点の位置は乱数シードで変わります。';
   $('canvasWrap').classList.toggle('knapsack',state.type==='knapsack');
   $('canvasHint').hidden=state.type!=='tsp';
   $('primaryLegend').textContent={tsp:'最良の巡回路',function:'最良の位置',knapsack:'選択した品物',coloring:'彩色した頂点'}[state.type];
@@ -78,13 +91,13 @@ function renderUI(){
 function value(v){return state.type==='knapsack'?-v:v;}
 function updateMetrics(){
   const b=value(sim.bestScore),c=value(sim.currentScore),initial=value(sim.initial);
-  $('bestValue').textContent=fmt(b);$('currentValue').textContent=fmt(c);$('iterationValue').textContent=fmt(sim.iteration,0);$('evaluationValue').textContent=fmt(sim.evaluations,0);$('iterationMax').textContent=`/ ${fmt(state.limit,0)}`;
+  $('bestValue').textContent=scoreText(b);$('currentValue').textContent=scoreText(c);$('iterationValue').textContent=fmt(sim.iteration,0);$('evaluationValue').textContent=fmt(sim.evaluations,0);$('iterationMax').textContent=`/ ${fmt(state.limit,0)}`;
   for(const id of ['bestValue','currentValue','iterationValue','evaluationValue'])$(id).classList.toggle('long-number',$(id).textContent.length>=9);
   const improvement=state.type==='knapsack'?b-initial:initial-b;
   $('improvement').textContent=initial!==0?`${state.type==='knapsack'?'↑':'↓'} ${(Math.max(0,improvement)/Math.abs(initial)*100).toFixed(1)}%`:improvement>0?`+${fmt(improvement)}`:'';
-  if(comparison)$('compareScore').textContent=`最良値 ${fmt(value(comparison.bestScore))} · ${fmt(comparison.evaluations,0)} 回評価`;
+  if(comparison)$('compareScore').textContent=`最良値 ${scoreText(value(comparison.bestScore))} · ${fmt(comparison.evaluations,0)} 回評価`;
   $('canvasBadge').textContent={tsp:`${state.size} CITIES`,function:FUNCTIONS[state.variant].name.toUpperCase(),knapsack:`${fmt(state.size,0)} ITEMS`,coloring:`${state.size} NODES / ${state.colors} COLORS`}[state.type];
-  $('canvasSubBadge').textContent={tsp:'EUCLIDEAN DISTANCE · CLOSED TOUR',function:'2D LANDSCAPE · MINIMUM = 0',knapsack:`CAPACITY ${problem.capacity} · MAXIMIZE VALUE`,coloring:'MINIMIZE EDGE CONFLICTS'}[state.type];
+  $('canvasSubBadge').textContent={tsp:'EUCLIDEAN DISTANCE · CLOSED TOUR',function:state.functionLayout==='shifted'?'SHIFTED + ROTATED · MINIMUM = 0':'CLASSIC LANDSCAPE · MINIMUM = 0',knapsack:`CAPACITY ${problem.capacity} · MAXIMIZE VALUE`,coloring:`${problem.edges?.length} EDGES · MINIMIZE CONFLICTS`}[state.type];
   updateRunButton();
 }
 function canvasSize(canvas,context){const r=canvas.getBoundingClientRect(),dpr=Math.min(window.devicePixelRatio||1,2);const w=Math.round(r.width*dpr),h=Math.round(r.height*dpr);if(canvas.width!==w||canvas.height!==h){canvas.width=w;canvas.height=h;}context.setTransform(dpr,0,0,dpr,0,0);return [r.width,r.height];}
@@ -155,8 +168,9 @@ const nodeColors=['#479e83','#9d89c3','#d3aa62','#d48674','#6a9ec0','#b0939f'];
 function drawColoring(w,h){
   grid(ctx,w,h);const solution=state.view==='best'?sim.best:sim.current;
   const pts=problem.points.map(p=>[w/2+(p[0]-.5)*Math.min(w-56,h-73),h/2-15+(p[1]-.5)*Math.min(w-56,h-73)]);
+  const spacing=2*Math.PI*.38*Math.min(w-56,h-73)/problem.size,nodeRadius=clamp(spacing*.36,1.7,8),showLabels=nodeRadius>=6&&problem.size<100;
   for(const [a,b] of problem.edges){const conflict=solution[a]===solution[b];ctx.beginPath();ctx.moveTo(...pts[a]);ctx.lineTo(...pts[b]);ctx.strokeStyle=conflict?'#c969606f':'#c3d0c570';ctx.lineWidth=conflict?2:1;ctx.stroke();}
-  pts.forEach(([x,y],i)=>{circle(ctx,x,y,10,'#fff');circle(ctx,x,y,8,nodeColors[solution[i]]);ctx.font='8px "DM Sans", sans-serif';ctx.fillStyle='#fff';ctx.textAlign='center';ctx.fillText(String(i+1),x,y+2.8);});ctx.textAlign='left';
+  pts.forEach(([x,y],i)=>{if(nodeRadius>=4)circle(ctx,x,y,nodeRadius+2,'#fff');circle(ctx,x,y,nodeRadius,nodeColors[solution[i]]);if(showLabels){ctx.font='8px "DM Sans", sans-serif';ctx.fillStyle='#fff';ctx.textAlign='center';ctx.fillText(String(i+1),x,y+2.8);}});ctx.textAlign='left';
 }
 function draw(){if(!sim)return;const [w,h]=canvasSize(scene,ctx);if(!w||!h)return;ctx.clearRect(0,0,w,h);({tsp:drawTSP,function:drawFunction,knapsack:drawKnapsack,coloring:drawColoring}[state.type])(w,h);}
 function drawChart(){
@@ -201,14 +215,14 @@ $('parameters').addEventListener('input',e=>{
 $('parameters').addEventListener('change',e=>{const key=e.target.dataset.key;if(key)$(`value-${key}`).value=state.params[key];});
 $('problemSettings').addEventListener('input',e=>{if(e.target.id==='sizeRange'){if($('sizeInput'))$('sizeInput').value=e.target.value;else $('sizeValue').textContent=e.target.value;e.target.style.setProperty('--fill',`${(e.target.value-PROBLEMS[state.type].min)/(PROBLEMS[state.type].max-PROBLEMS[state.type].min)*100}%`);}});
 function setProblemSize(value){const p=PROBLEMS[state.type],n=Number(value);state.size=Number.isFinite(n)&&value!==''?clamp(Math.round(n),p.min,p.max):state.size;renderUI();reset({newProblem:true});}
-$('problemSettings').addEventListener('change',e=>{if(e.target.id==='sizeRange'||e.target.id==='sizeInput'){setProblemSize(e.target.value);return;}if(e.target.id==='functionSelect')state.variant=e.target.value;else if(e.target.id==='colorsSelect')state.colors=Number(e.target.value);else return;renderUI();reset({newProblem:true});});
+$('problemSettings').addEventListener('change',e=>{if(e.target.id==='sizeRange'||e.target.id==='sizeInput'){setProblemSize(e.target.value);return;}if(e.target.id==='functionSelect')state.variant=e.target.value;else if(e.target.id==='colorsSelect')state.colors=Number(e.target.value);else if(e.target.id==='functionLayout')state.functionLayout=e.target.value;else if(e.target.id==='graphConnections')state.graphConnections=e.target.value;else return;renderUI();reset({newProblem:true});});
 $('problemSettings').addEventListener('click',e=>{const button=e.target.closest('[data-size]');if(button)setProblemSize(button.dataset.size);});
 $('problemSettings').addEventListener('keydown',e=>{if(e.key==='Enter'&&e.target.id==='sizeInput'){e.preventDefault();setProblemSize(e.target.value);}});
 $('seedInput').addEventListener('change',e=>{state.seed=clamp(Math.round(Number(e.target.value)||0),0,999999);e.target.value=state.seed;reset({newProblem:true});});
 function setIterationLimit(value){const n=Number(value);if(value!==''&&Number.isFinite(n))state.limit=clamp(Math.round(n),ITERATION_LIMITS.min,ITERATION_LIMITS.max);$('limitInput').value=state.limit;if(sim.iteration>=state.limit)pause();updateMetrics();if(!state.running){draw();drawChart();}persist();}
 $('limitInput').addEventListener('change',e=>setIterationLimit(e.target.value));
 $('limitInput').addEventListener('keydown',e=>{if(e.key==='Enter'){e.preventDefault();setIterationLimit(e.target.value);e.target.blur();}});
-$('speed').addEventListener('change',e=>{state.speed=e.target.value==='fast'?'fast':Number(e.target.value);accumulator=0;});
+$('speed').addEventListener('change',e=>{state.speed=e.target.value==='fast'?'fast':Number(e.target.value);speedCustomized=true;accumulator=0;});
 $('runBtn').addEventListener('click',toggleRun);
 $('quickRun').addEventListener('click',toggleRun);
 $('stepBtn').addEventListener('click',()=>{advance();updateMetrics();draw();drawChart();});
@@ -243,4 +257,4 @@ scene.addEventListener('pointermove',e=>{if(e.pointerType==='mouse')inspectKnaps
 scene.addEventListener('pointerleave',e=>{if(e.pointerType==='mouse'){inspectedItem=-1;$('itemTooltip').hidden=true;}});
 document.addEventListener('visibilitychange',()=>{lastTime=performance.now();accumulator=0;});
 const observer=new ResizeObserver(()=>{draw();drawChart();});observer.observe($('canvasWrap'));observer.observe(chart.parentElement);
-ensureComparison();renderUI();reset({newProblem:true});requestAnimationFrame(frame);
+applyProblemPace();ensureComparison();renderUI();reset({newProblem:true});requestAnimationFrame(frame);

@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import {createProblem,objective,Simulation,METHODS,FUNCTIONS,PROBLEMS,ITERATION_LIMITS,random} from '../dist/engine.mjs';
+import {createProblem,objective,Simulation,METHODS,FUNCTIONS,PROBLEMS,GRAPH_CONNECTIONS,ITERATION_LIMITS,random} from '../dist/engine.mjs';
 import {knapsackLayout,knapsackItemAt} from '../dist/knapsack-view.mjs';
 
 test('known objective values and planted coloring',()=>{
@@ -95,4 +95,48 @@ test('dense item grids fit mobile and desktop and inspect every item correctly',
     assert.equal(knapsackItemAt(layout,width,height),-1);
     assert.equal(knapsackItemAt(layout,layout.left+layout.cellWidth+layout.gap/2,layout.top+1),-1);
   }
+});
+
+test('shifted landscapes preserve the original function and its known minimum',()=>{
+  for(const [variant,base] of Object.entries(FUNCTIONS))for(const seed of [0,7,42,123]){
+    const p=createProblem('function',2,seed,variant);
+    assert.equal(p.functionLayout,'shifted');assert.ok(Math.abs(objective(p,p.optimum))<1e-9);
+    assert.ok(p.optimum.every(v=>Math.abs(v)<=p.range));
+    const {angle,offset}=p.coordinateTransform,c=Math.cos(angle),s=Math.sin(angle),u=.3,v=-.4;
+    const x=offset[0]+c*u-s*v,y=offset[1]+s*u+c*v;
+    assert.ok(Math.abs(p.f(x,y)-base.f(u,v))<1e-8);
+    const same=createProblem('function',2,seed,variant);assert.deepEqual(p.coordinateTransform,same.coordinateTransform);
+    const classic=createProblem('function',2,seed,variant,3,{functionLayout:'classic'});
+    assert.equal(classic.f(u,v),base.f(u,v));assert.deepEqual(classic.optimum,base.optimum);
+  }
+  assert.notDeepEqual(createProblem('function',2,7).coordinateTransform,createProblem('function',2,42).coordinateTransform);
+});
+
+test('graph connection levels add constraints without losing a feasible planted coloring',()=>{
+  assert.equal(PROBLEMS.coloring.size,60);assert.equal(PROBLEMS.coloring.colors,3);
+  for(const seed of [7,42,123]){
+    let previous=new Set();
+    for(const graphConnections of Object.keys(GRAPH_CONNECTIONS)){
+      const p=createProblem('coloring',60,seed,'rastrigin',3,{graphConnections}),edges=new Set(p.edges.map(e=>e.join(',')));
+      assert.equal(objective(p,p.groups),0);assert.ok([...previous].every(e=>edges.has(e)));
+      assert.ok(edges.size>previous.size);assert.ok(p.edges.every(([a,b])=>a!==b&&p.groups[a]!==p.groups[b]));previous=edges;
+    }
+  }
+  const large=createProblem('coloring',150,42);assert.equal(large.points.length,150);assert.equal(objective(large,large.groups),0);
+});
+
+test('function observation preset extends visible progress and still reaches the minimum',()=>{
+  const current=new Simulation(createProblem('function',2,42,'rastrigin'),'pso',{},42);
+  const legacy=new Simulation(createProblem('function',2,42,'rastrigin',3,{functionLayout:'classic'}),'pso',{population:40,inertia:.7,cognitive:1.5,social:1.5},42);
+  const firstNearMinimum=sim=>{for(let i=0;i<2000;i++){sim.step();if(sim.bestScore<1e-3)return sim.iteration;}return Infinity;};
+  const before=firstNearMinimum(legacy),after=firstNearMinimum(current);
+  assert.ok(after>before+20);assert.ok(after<2000);
+});
+
+test('graph observation preset keeps searching beyond the introductory instance',()=>{
+  const current=new Simulation(createProblem('coloring'),'ga',{},42);
+  const legacy=new Simulation(createProblem('coloring',24,42,'rastrigin',4,{graphConnections:'sparse'}),'ga',{population:40,mutation:.2,crossover:.85},42);
+  const firstFeasible=sim=>{for(let i=0;i<2000;i++){sim.step();if(sim.bestScore===0)return sim.iteration;}return Infinity;};
+  const before=firstFeasible(legacy),after=firstFeasible(current);
+  assert.ok(after>before+30);assert.ok(after<2000);
 });
