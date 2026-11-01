@@ -1,4 +1,5 @@
-// All objectives are minimized. Coordinates and distances are dimensionless.
+import {generateDeliveryOrders,makeDeliveryProblem,deliveryDistance,deliveryCandidate,deliveryNeighbor,deliveryCrossover} from './delivery.mjs';
+// All objectives are minimized. TSP uses normalized coordinates; delivery uses AHC006 units.
 export function random(seed = 42) {
   let n = (Number(seed) >>> 0) || 0x9e3779b9;
   return () => {n ^= n << 13; n ^= n >>> 17; n ^= n << 5; return (n >>> 0) / 4294967296;};
@@ -14,22 +15,32 @@ export const FUNCTIONS = {
   sphere: {name:'Sphere',range:5,formula:'f(x, y) = x² + y²',f:(x,y)=>x*x+y*y,optimum:[0,0]}
 };
 export const METHODS = {
-  sa:{name:'焼きなまし法',en:'Simulated Annealing',short:'SA',color:'#11856e',icon:'flame',problems:['tsp','function','knapsack','coloring'],description:'ときには悪い変化も受け入れ、局所解から抜け出す。温度を徐々に下げながら、よい解に絞り込みます。',detail:'改悪量 Δ と温度 T に対し、確率 exp(−Δ / T) で移動を受理します。温度が高いほど大胆に、低いほど慎重に探索します。',params:[['temperature','初期温度',.001,100,.001,.3],['cooling','冷却率',.9,.9999,.0001,.997],['stepSize','近傍の大きさ',.01,1,.01,.12]]},
-  ga:{name:'遺伝的アルゴリズム',en:'Genetic Algorithm',short:'GA',color:'#8870d3',icon:'dna',problems:['tsp','function','knapsack','coloring'],description:'解の集団を育てる進化の探索。よい個体を選び、交叉と突然変異によって次の世代を作ります。',detail:'トーナメント選択・エリート保存を使用。巡回路には順序交叉、関数にはブレンド交叉、離散変数には一様交叉を適用します。',params:[['population','個体数',10,120,2,40],['mutation','突然変異率',0,1,.01,.2],['crossover','交叉率',0,1,.01,.85]]},
+  sa:{name:'焼きなまし法',en:'Simulated Annealing',short:'SA',color:'#11856e',icon:'flame',problems:['tsp','function','knapsack','coloring','delivery'],description:'ときには悪い変化も受け入れ、局所解から抜け出す。温度を徐々に下げながら、よい解に絞り込みます。',detail:'改悪量 Δ と温度 T に対し、確率 exp(−Δ / T) で移動を受理します。温度が高いほど大胆に、低いほど慎重に探索します。',params:[['temperature','初期温度',.001,100,.001,.3],['cooling','冷却率',.9,.9999,.0001,.997],['stepSize','近傍の大きさ',.01,1,.01,.12]]},
+  ga:{name:'遺伝的アルゴリズム',en:'Genetic Algorithm',short:'GA',color:'#8870d3',icon:'dna',problems:['tsp','function','knapsack','coloring','delivery'],description:'解の集団を育てる進化の探索。よい個体を選び、交叉と突然変異によって次の世代を作ります。',detail:'トーナメント選択・エリート保存を使用。巡回路には順序交叉、関数にはブレンド交叉、離散変数には一様交叉を適用します。配送では注文集合を交叉し、親の経路情報を参考に受取順序を守って構築します。',params:[['population','個体数',10,120,2,40],['mutation','突然変異率',0,1,.01,.2],['crossover','交叉率',0,1,.01,.85]]},
   pso:{name:'粒子群最適化',en:'Particle Swarm Optimization',short:'PSO',color:'#d08a35',icon:'swarm',problems:['function'],description:'粒子が経験と群れの情報を共有。自分の最良位置と群れの最良位置を手がかりに動きます。',detail:'v ← wv + c₁r₁(pbest − x) + c₂r₂(gbest − x)。探索範囲の境界では位置を制限し、速度を反転・減衰します。',params:[['population','粒子数',10,120,2,40],['inertia','慣性係数 w',.1,1.2,.01,.7],['cognitive','自己の重み c₁',0,3,.05,1.5],['social','群れの重み c₂',0,3,.05,1.5]]},
   aco:{name:'蟻コロニー最適化',en:'Ant Colony Optimization',short:'ACO',color:'#ce7661',icon:'ant',problems:['tsp'],description:'短い経路にフェロモンを残す蟻の群れ。よい経路の情報が蓄積し、次の探索を導きます。',detail:'Ant System 型の構築探索。辺の選択確率は τ^α × (1/d)^β に比例。各巡回後に蒸発し、全ての蟻が Q/L のフェロモンを残します。',params:[['population','蟻の数',10,100,2,30],['alpha','フェロモンの重み α',.1,4,.1,1],['beta','距離の重み β',.1,6,.1,3],['evaporation','蒸発率 ρ',.01,.9,.01,.25]]},
   de:{name:'差分進化法',en:'Differential Evolution',short:'DE',color:'#548dc6',icon:'branch',problems:['function'],description:'個体同士の差を、次の一歩に変える。集団の位置の差分から新しい候補を生み出します。',detail:'DE/rand/1/bin を使用。異なる3個体から a + F(b − c) を作り、二項交叉した候補が親以上なら置換します。',params:[['population','個体数',10,120,2,40],['differential','差分係数 F',.1,2,.05,.7],['crossover','交叉率 CR',0,1,.01,.9]]},
-  hill:{name:'山登り法',en:'Hill Climbing',short:'HC',color:'#7a8a9b',icon:'mountain',problems:['tsp','function','knapsack','coloring'],description:'いまよりよい隣へ、一歩ずつ。改善する変化だけを受け入れる、シンプルな探索です。',detail:'ランダムな近傍を1つ生成し、目的値が改善したときに移動します。局所解では止まりやすいため、他の手法との比較にも向いています。',params:[['stepSize','近傍の大きさ',.01,1,.01,.12]]}
+  hill:{name:'山登り法',en:'Hill Climbing',short:'HC',color:'#7a8a9b',icon:'mountain',problems:['tsp','function','knapsack','coloring','delivery'],description:'いまよりよい隣へ、一歩ずつ。改善する変化だけを受け入れる、シンプルな探索です。',detail:'ランダムな近傍を1つ生成し、目的値が改善したときに移動します。局所解では止まりやすいため、他の手法との比較にも向いています。',params:[['stepSize','近傍の大きさ',.01,1,.01,.12]]}
 };
 export const PROBLEMS = {
   tsp:{name:'巡回セールスマン',en:'Traveling Salesman',tag:'経路最適化',icon:'route',unit:'総移動距離',direction:'min',description:'すべての都市を一度ずつ訪れ、出発点に戻る。最も短い巡回路を探します。',sizeLabel:'都市数',min:10,max:100,step:5,size:40},
   function:{name:'関数最適化',en:'Function Optimization',tag:'連続最適化',icon:'landscape',unit:'目的関数値',direction:'min',description:'起伏のある地形を探索して、関数が最小になる座標を見つけます。',sizeLabel:null,size:2},
   knapsack:{name:'ナップサック',en:'0/1 Knapsack',tag:'組合せ最適化',icon:'bag',unit:'合計価値',direction:'max',description:'重さの制限の中で、価値の合計が最大になる品物の組合せを探します。',sizeLabel:'品物数',min:10,max:10000,step:1,size:30},
-  coloring:{name:'グラフ彩色',en:'Graph Coloring',tag:'制約充足',icon:'network',unit:'色の衝突数',direction:'min',description:'隣り合う頂点が同じ色にならないように、指定した色数で塗り分けます。',sizeLabel:'頂点数',min:10,max:150,step:2,size:60,colors:3}
+  coloring:{name:'グラフ彩色',en:'Graph Coloring',tag:'制約充足',icon:'network',unit:'色の衝突数',direction:'min',description:'隣り合う頂点が同じ色にならないように、指定した色数で塗り分けます。',sizeLabel:'頂点数',min:10,max:150,step:2,size:60,colors:3},
+  delivery:{name:'フードデリバリー',en:'AHC006 · Food Delivery',tag:'順序制約付き経路',icon:'delivery',unit:'総移動時間',direction:'min',description:'1,000件から50件を選び、受取を配達より先に済ませてオフィスに戻る、短い経路を探します。',sizeLabel:null,min:1000,max:1000,size:1000}
 };
+export function parametersFor(method,type){
+  const params=METHODS[method].params.map(a=>a.slice());
+  if(type==='delivery'){
+    if(method==='sa')params[0]=['temperature','初期温度',1,1000,1,30];
+    params.push(['orderSwapRate','注文集合の入替率',0,1,.05,.3],['candidatePool','入替候補の範囲',50,1000,10,250]);
+  }
+  return params;
+}
 export const ITERATION_LIMITS = {min:1,max:1000000,default:2000,presets:[500,2000,10000,100000,1000000]};
 export const GRAPH_CONNECTIONS = {sparse:{name:'少なめ',rate:.22},standard:{name:'標準',rate:.42},dense:{name:'多め',rate:.62}};
 export function createProblem(type, size=PROBLEMS[type].size, seed=42, variant='rastrigin', colors=PROBLEMS.coloring.colors, options={}) {
+  if(type==='delivery')return makeDeliveryProblem(options.deliveryOrders||generateDeliveryOrders(random(seed)),seed,options.deliveryInitialization,options.deliveryOrders?'imported':'generated');
   const rng=random(seed), p={type,size,seed,variant,colors};
   if(type==='tsp') {
     p.points=Array.from({length:size},()=>[.05+.9*rng(),.05+.9*rng()]);
@@ -57,6 +68,7 @@ export function createProblem(type, size=PROBLEMS[type].size, seed=42, variant='
   return p;
 }
 export function objective(p,x) {
+  if(p.type==='delivery')return deliveryDistance(p,x);
   if(p.type==='tsp')return x.reduce((s,a,i)=>s+p.dist[a][x[(i+1)%x.length]],0);
   if(p.type==='function')return p.f(x[0],x[1]);
   if(p.type==='knapsack'){let w=0,v=0;for(let i=0;i<x.length;i++)if(x[i]){w+=p.items[i].weight;v+=p.items[i].value;}return w>p.capacity?10000+(w-p.capacity)*100:-v;}
@@ -74,11 +86,13 @@ function repair(p,x,rng) {
   return x;
 }
 function candidate(p,rng) {
+  if(p.type==='delivery')return deliveryCandidate(p,rng);
   if(p.type==='tsp')return shuffle(Array.from({length:p.size},(_,i)=>i),rng);
   if(p.type==='function')return [(rng()*2-1)*p.range,(rng()*2-1)*p.range];
   return repair(p,Array.from({length:p.size},()=>p.type==='coloring'?Math.floor(rng()*p.colors):(rng()<.5?1:0)),rng);
 }
-function neighbor(p,x,rng,step=.12) {
+function neighbor(p,x,rng,step=.12,params={}) {
+  if(p.type==='delivery')return deliveryNeighbor(p,x,rng,params);
   const y=copy(x);
   if(p.type==='tsp') {let a=Math.floor(rng()*y.length),b=Math.floor(rng()*y.length);if(a>b)[a,b]=[b,a];if(a===b)b=(b+1)%y.length;if(a>b)[a,b]=[b,a];y.splice(a,b-a+1,...y.slice(a,b+1).reverse());}
   else if(p.type==='function'){const d=Math.floor(rng()*2);y[d]+=gaussian(rng)*p.range*step;}
@@ -86,6 +100,7 @@ function neighbor(p,x,rng,step=.12) {
   return repair(p,y,rng);
 }
 function crossover(p,a,b,rng) {
+  if(p.type==='delivery')return deliveryCrossover(p,a,b,rng);
   if(p.type==='tsp'){
     let l=Math.floor(rng()*a.length),r=Math.floor(rng()*a.length);if(l>r)[l,r]=[r,l];
     const out=Array(a.length).fill(-1),used=new Set(a.slice(l,r+1));for(let i=l;i<=r;i++)out[i]=a[i];
@@ -95,14 +110,15 @@ function crossover(p,a,b,rng) {
   return repair(p,a.map((v,i)=>rng()<.5?v:b[i]),rng);
 }
 export function defaults(method,type) {
-  const params=Object.fromEntries(METHODS[method].params.map(a=>[a[0],a[5]]));
-  if(method==='sa')params.temperature={tsp:.3,function:12,knapsack:30,coloring:3}[type];
+  const params=Object.fromEntries(parametersFor(method,type).map(a=>[a[0],a[5]]));
+  if(method==='sa')params.temperature={tsp:.3,function:12,knapsack:30,coloring:3,delivery:30}[type];
   if(type==='function')Object.assign(params,{
     pso:{population:20,inertia:.88,cognitive:1.2,social:.85},
     ga:{population:32,mutation:.5,crossover:.8},
     de:{population:24,differential:1.1,crossover:.5}
   }[method]);
   if(type==='coloring')Object.assign(params,{sa:{cooling:.999},ga:{population:30,mutation:.35,crossover:.8}}[method]);
+  if(type==='delivery')Object.assign(params,{sa:{cooling:.999},ga:{population:16,mutation:.8,crossover:.7}}[method]);
   return params;
 }
 export class Simulation {
@@ -120,14 +136,14 @@ export class Simulation {
   step(){
     const {problem:p,rng:r,params:q}=this;
     if(this.method==='sa'||this.method==='hill'){
-      const x=neighbor(p,this.current,r,q.stepSize),s=this.evaluate(x),delta=s-this.currentScore;
+      const x=neighbor(p,this.current,r,q.stepSize,q),s=this.evaluate(x),delta=s-this.currentScore;
       this.temperature=q.temperature*Math.pow(q.cooling,this.iteration);
       if(delta<=0||(this.method==='sa'&&r()<Math.exp(-delta/Math.max(1e-12,this.temperature)))){this.current=x;this.currentScore=s;this.accepted++;}
     } else if(this.method==='ga') {
       this.resizePopulation();const pop=this.population;
       const select=()=>{let a=pop[Math.floor(r()*pop.length)];for(let j=0;j<2;j++){const b=pop[Math.floor(r()*pop.length)];if(b.score<a.score)a=b;}return a.x;};
       const elite=pop.reduce((a,b)=>a.score<b.score?a:b),next=[{...elite,x:copy(elite.x)}];
-      while(next.length<pop.length){const a=select();let x=r()<q.crossover?crossover(p,a,select(),r):copy(a);if(r()<q.mutation)x=neighbor(p,x,r,.15);next.push({x,score:this.evaluate(x)});}
+      while(next.length<pop.length){const a=select();let x=r()<q.crossover?crossover(p,a,select(),r):copy(a);if(r()<q.mutation)x=neighbor(p,x,r,.15,q);next.push({x,score:this.evaluate(x)});}
       this.population=next;const a=next.reduce((a,b)=>a.score<b.score?a:b);this.current=copy(a.x);this.currentScore=a.score;
     } else if(this.method==='pso') {
       this.resizePopulation();const global=copy(this.best);

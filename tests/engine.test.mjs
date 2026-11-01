@@ -2,6 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import {createProblem,objective,Simulation,METHODS,FUNCTIONS,PROBLEMS,GRAPH_CONNECTIONS,ITERATION_LIMITS,random} from '../dist/engine.mjs';
 import {knapsackLayout,knapsackItemAt} from '../dist/knapsack-view.mjs';
+import {isDeliveryRoute} from '../dist/delivery.mjs';
 
 test('known objective values and planted coloring',()=>{
   const tsp={type:'tsp',dist:[[0,1,Math.SQRT2,1],[1,0,1,Math.SQRT2],[Math.SQRT2,1,0,1],[1,Math.SQRT2,1,0]]};
@@ -12,9 +13,9 @@ test('known objective values and planted coloring',()=>{
   for(let seed=0;seed<10;seed++){const p=createProblem('coloring',24,seed);assert.equal(objective(p,p.groups),0);}
 });
 
-for(const type of ['tsp','function','knapsack','coloring'])for(const [method,meta] of Object.entries(METHODS))if(meta.problems.includes(type)){
+for(const type of ['tsp','function','knapsack','coloring','delivery'])for(const [method,meta] of Object.entries(METHODS))if(meta.problems.includes(type)){
   test(`${type}/${method}: legal solutions, actual scores, monotonic best and deterministic replay`,()=>{
-    const p=createProblem(type,type==='function'?2:18,42),a=new Simulation(p,method,{},42),b=new Simulation(p,method,{},42);
+    const p=createProblem(type,type==='function'?2:type==='delivery'?1000:18,42),a=new Simulation(p,method,{},42),b=new Simulation(p,method,{},42);
     let best=a.bestScore;
     for(let i=0;i<160;i++){
       a.step();b.step();assert.ok(a.bestScore<=best+1e-10);best=a.bestScore;
@@ -24,6 +25,7 @@ for(const type of ['tsp','function','knapsack','coloring'])for(const [method,met
         if(type==='function')assert.ok(x.every(v=>Number.isFinite(v)&&Math.abs(v)<=p.range));
         if(type==='knapsack'){assert.ok(x.every(v=>v===0||v===1));assert.ok(x.reduce((s,b,i)=>s+b*p.items[i].weight,0)<=p.capacity);}
         if(type==='coloring')assert.ok(x.every(v=>Number.isInteger(v)&&v>=0&&v<p.colors));
+        if(type==='delivery')assert.ok(isDeliveryRoute(p,x));
       }
     }
     assert.deepEqual(a.snapshot(),b.snapshot());assert.equal(a.iteration,160);assert.ok(a.evaluations>160);
