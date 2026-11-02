@@ -305,3 +305,42 @@ main {
 .chart-scale-note { color: #91a198; font-size: 8.5px; line-height: 1.8; margin: 0 18px 13px; }
 @media (min-width: 1600px) { .chart-scale-control { font-size: 10px; } .chart-scale-control select { width: 70px; font-size: 10px; } .chart-scale-note { font-size: 9px; } }
 @media (max-width: 359px) { .chart-controls { gap: 5px; } .chart-scale-control { gap: 4px; font-size: 8px; } .chart-scale-control select { width: 60px; font-size: 8px; } }
+
+.all-time-best {
+  display: flex;
+  align-items: center;
+  gap: 20px;
+  flex-wrap: wrap;
+  margin: -5px 0 21px;
+  padding: 15px 20px;
+  border: 1px solid #dce9df;
+  border-radius: 8px;
+  background: #edf5ef;
+}
+.all-time-best-primary { min-width: 150px; }
+.all-time-best-label { display: block; font-size: 9px; color: #79947e; margin-bottom: 6px; }
+.all-time-best-value-row { display: flex; align-items: baseline; flex-wrap: wrap; gap: 9px; }
+#allTimeBestValue { font: 500 24px/1.2 var(--mono); letter-spacing: -.5px; color: #3b7e58; }
+#allTimeBestExtra { font-size: 9px; color: #92a18f; }
+.all-time-best-context { min-width: 0; flex: 1; }
+#allTimeBestScope,#allTimeBestMeta { display: block; font-size: 9px; color: #77917c; line-height: 1.9; overflow-wrap: anywhere; }
+.all-time-best-actions { display: flex; align-items: center; flex-wrap: wrap; gap: 12px; }
+#allTimeBestStatus { color: #91a28b; font-size: 8px; }
+#allTimeBestStatus.record-save-error { color: #b56a5c; }
+#bestRecordListBtn { padding: 7px 10px; background: #fff9; border: 1px solid #d5e4d7; border-radius: 5px; color: #64856a; font-size: 10px; }
+#bestRecordListBtn:hover { background: #fff; }
+.best-record-list-controls { display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 12px; }
+.best-record-list-controls label { display: flex; align-items: center; gap: 8px; font-size: 10px; color: #7b8f82; }
+.best-record-list-controls select { font-family: var(--font); font-size: 10px; max-width: 190px; }
+.best-record-table-wrap { max-width: 100%; overflow-x: auto; margin-top: 13px; }
+.best-record-table { width: 100%; min-width: 570px; border-collapse: collapse; font-size: 10px; }
+.best-record-table th,.best-record-table td { padding: 12px 10px; border-bottom: 1px solid var(--line); text-align: left; vertical-align: top; }
+.best-record-table th { color: #9ca99f; font-weight: 500; font-size: 9px; white-space: nowrap; }
+.best-record-table td { color: #6b8271; }
+.best-record-table small { display: block; color: #9aa89d; font-size: 8px; line-height: 1.9; margin-top: 4px; }
+.best-record-table strong { font-weight: 550; color: #4e785d; }
+.best-record-table details { margin-top: 7px; }
+.best-record-table summary { cursor: pointer; font-size: 9px; }
+.best-record-table pre { white-space: pre-wrap; font: 9px/1.8 var(--font); margin: 8px 0 0; }
+@media(min-width:1600px){.all-time-best-label,#allTimeBestScope,#allTimeBestMeta{font-size:11px}#allTimeBestValue{font-size:29px}#allTimeBestExtra,#bestRecordListBtn{font-size:11px}#allTimeBestStatus{font-size:10px}}
+@media(max-width:650px){.all-time-best{padding:14px;gap:10px 15px}.all-time-best-primary{min-width:125px}.all-time-best-context{flex-basis:140px}.all-time-best-actions{width:100%;justify-content:space-between}#allTimeBestValue{font-size:23px}}

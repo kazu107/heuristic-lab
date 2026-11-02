@@ -3,11 +3,13 @@ import {knapsackLayout,knapsackItemAt} from './knapsack-view.mjs';
 import {parseDeliveryInput,deliveryScore,deliveryOrderIds,isDeliveryRoute,formatDeliveryInput,formatDeliveryOutput} from './delivery.mjs';
 import {drawDelivery,deliveryGeometry,deliveryHitTest} from './delivery-view.mjs';
 import {iterationAxis} from './chart-axis.mjs';
+import {BestRecordBook} from './best-records.mjs';
 
 const $ = id => document.getElementById(id);
 const icon = (name,cls='') => `<svg class="icon ${cls}" aria-hidden="true"><use href="#i-${name}"/></svg>`;
 const fmt = (v,d=3) => Math.abs(v)<1e-7?'0':Number(v).toLocaleString('en-US',{maximumFractionDigits:d,minimumFractionDigits:Number.isInteger(v)?0:d});
 const scoreText = v => state.type==='function'&&v>0&&v<.01?v.toExponential(2):fmt(v);
+const bestRecordDateFormatter=new Intl.DateTimeFormat('ja-JP',{year:'numeric',month:'2-digit',day:'2-digit',hour:'2-digit',minute:'2-digit'});
 const clamp = (v,a,b) => Math.max(a,Math.min(b,v));
 const state = {type:'tsp', method:'sa', size:40, seed:42, variant:'rastrigin', colors:PROBLEMS.coloring.colors, functionLayout:'shifted',graphConnections:'standard',deliveryInitialization:'nearby',chartXScale:'linear',params:{}, speed:1, limit:ITERATION_LIMITS.default, compare:false, compareMethod:'ga', view:'best', ghost:true, running:false};
 try {
@@ -34,6 +36,8 @@ try {
 } catch {}
 state.params={...defaults(state.method,state.type),...state.params};
 let problem, sim, comparison, toastTimer, accumulator=0, lastTime=0, dragged=-1, heatmapCache=null, lastMetricTime=0, lastDrawTime=0, itemLayout=null, inspectedItem=-1, speedCustomized=false, deliveryOrders=null, deliveryFocus=-1;
+let activeBestRecord=null,listedBestRecords=[];
+const bestBook=new BestRecordBook(handleBestRecordUpdate);
 const scene=$('scene'), ctx=scene.getContext('2d'), chart=$('chart'), chartCtx=chart.getContext('2d');
 
 function persist(){try{localStorage.setItem('heuristic-lab-v1',JSON.stringify({type:state.type,method:state.method,size:state.size,seed:state.seed,variant:state.variant,colors:state.colors,functionLayout:state.functionLayout,graphConnections:state.graphConnections,deliveryInitialization:state.deliveryInitialization,chartXScale:state.chartXScale,observationVersion:1,params:state.params,limit:state.limit}));}catch{}}
@@ -45,7 +49,48 @@ function reset({newProblem=false}={}) {
   pause();if(newProblem||!problem)problem=createProblem(state.type,state.size,state.seed,state.variant,state.colors,{functionLayout:state.functionLayout,graphConnections:state.graphConnections,deliveryInitialization:state.deliveryInitialization,deliveryOrders});
   sim=new Simulation(problem,state.method,state.params,state.seed);
   comparison=state.compare?new Simulation(problem,state.compareMethod,{},state.seed):null;
+  activateBestRecord();trackBestRecord();
   heatmapCache=null;inspectedItem=-1;itemLayout=null;deliveryFocus=-1;$('itemTooltip').hidden=true;updateMetrics();draw();drawChart();persist();
+}
+function bestRecordValue(record){const n=record.type==='knapsack'?-record.score:record.score;return record.type==='function'&&n>0&&n<.01?n.toExponential(2):fmt(n);}
+function recordDate(record){return bestRecordDateFormatter.format(new Date(record.updatedAt));}
+function renderBestRecord(){
+  const context=activeBestRecord,record=context?.record;
+  $('allTimeBestLabel').textContent=`歴代ベスト · ${PROBLEMS[state.type].unit}`;
+  $('allTimeBestValue').textContent=record?bestRecordValue(record):'—';
+  $('allTimeBestMeta').textContent=record?`${METHODS[record.method].short} · ${fmt(record.iteration,0)}反復 · ${recordDate(record)}`:'手法を横断して自動記録します';
+  $('allTimeBestScope').textContent=`Seed ${state.seed} · ${context?.identity?.summary||PROBLEMS[state.type].name}`;
+  $('allTimeBestStatus').textContent=({loading:'読込中',saving:'自動保存中',saved:'このブラウザーに保存',error:'記録を保存できません',empty:'記録なし'})[context?.status||'loading'];
+  $('allTimeBestStatus').classList.toggle('record-save-error',context?.status==='error');
+  $('allTimeBestExtra').textContent=record?.type==='delivery'?`公式式スコア ${fmt(deliveryScore(record.score),0)}`:state.type==='knapsack'?'大きいほど良い':'小さいほど良い';
+}
+function activateBestRecord(){
+  const context={problem,identity:null,record:null,status:'loading'};activeBestRecord=context;renderBestRecord();
+  bestBook.identity(problem).then(identity=>{context.identity=identity;return bestBook.getById(identity.id);}).then(record=>{
+    if(activeBestRecord!==context)return;
+    if(record&&(!context.record||record.score<context.record.score))context.record=record;
+    if(context.status!=='error')context.status=context.record?'saved':'empty';renderBestRecord();
+  }).catch(()=>{if(activeBestRecord===context){context.status='error';renderBestRecord();}});
+}
+function handleBestRecordUpdate(event){
+  const context=activeBestRecord;if(!context)return;
+  if(event.record&&context.identity?.id===event.record.id){const status=event.pending?'saving':'saved',changed=!context.record||event.record.score<context.record.score||context.status!==status;if(!context.record||event.record.score<context.record.score)context.record=event.record;context.status=status;if(changed)renderBestRecord();}
+  else if(event.problem===context.problem){const status=event.error?'error':event.pending?'saving':context.status;if(status!==context.status){context.status=status;renderBestRecord();}}
+}
+function trackBestRecord(){bestBook.consider(problem,sim);if(comparison)bestBook.consider(problem,comparison);}
+const escapeRecordText=text=>String(text).replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+function renderBestRecordList(){
+  const container=$('bestRecordRows');if(!container)return;
+  const filter=$('bestRecordFilter').value,rows=listedBestRecords.filter(r=>filter==='all'||r.type===filter);
+  $('bestRecordCount').textContent=`${rows.length}件の記録 · 最近更新した順`;
+  container.innerHTML=rows.length?`<div class="best-record-table-wrap"><table class="best-record-table"><thead><tr><th>問題・条件</th><th>シード</th><th>歴代ベスト</th><th>手法・設定</th><th>更新日時</th></tr></thead><tbody>${rows.map(record=>{
+    const parameters=parametersFor(record.method,record.type).filter(([key])=>key!=='stepSize'||record.type==='function').map(([key,label])=>`${label}: ${record.params[key]??'—'}`).join('\n')+(record.initialization?`\n初期解: ${record.initialization==='random'?'ランダムな注文':'中心近くの注文'}`:'');
+    return `<tr><td><strong>${escapeRecordText(PROBLEMS[record.type].name)}</strong><small>${escapeRecordText(record.summary)}</small><small>条件ID: ${escapeRecordText(record.dataId)}</small></td><td>${record.seed}</td><td><strong>${escapeRecordText(bestRecordValue(record))}</strong><small>${escapeRecordText(PROBLEMS[record.type].unit)}${record.type==='delivery'?` · スコア${fmt(deliveryScore(record.score),0)}`:''}</small></td><td>${escapeRecordText(METHODS[record.method].name)}<small>${fmt(record.iteration,0)}反復 · ${fmt(record.evaluations,0)}回評価</small><details><summary>パラメーター</summary><pre>${escapeRecordText(parameters)}</pre></details></td><td>${escapeRecordText(recordDate(record))}</td></tr>`;
+  }).join('')}</tbody></table></div>`:'<p class="dialog-description">この問題の記録はまだありません。</p>';
+}
+async function showBestRecordList(){
+  showDialog(`<h2 class="dialog-title">歴代ベストの記録</h2><p class="dialog-description">同じ問題データ・同じシードについて、全手法を通したベストを保存します。品数・関数・色数などの条件が異なる場合や、都市の編集・入力データの違いは別の記録です。このブラウザー内に保存されます。</p><div class="best-record-list-controls"><label>問題 <select id="bestRecordFilter" aria-label="記録一覧の問題" disabled><option value="all">すべて</option>${Object.entries(PROBLEMS).map(([key,p])=>`<option value="${key}" ${key===state.type?'selected':''}>${p.name}</option>`).join('')}</select></label><button id="bestRecordExport" class="text-button" type="button" disabled>全記録をJSONで保存</button></div><p id="bestRecordCount" class="param-help">読込中…</p><div id="bestRecordRows"></div>`);
+  try{listedBestRecords=await bestBook.list();if($('bestRecordFilter')){$('bestRecordFilter').disabled=false;$('bestRecordExport').disabled=false;renderBestRecordList();}}catch{if($('bestRecordRows'))$('bestRecordRows').textContent='この環境では記録を読み込めません。';}
 }
 function updateRunButton(){
   $('runBtn').classList.toggle('running',state.running);
@@ -214,7 +259,7 @@ function drawChart(){
   histories.forEach((hist,index)=>{if(!hist.length)return;const color=index?'#9981cd':'#198970';c.beginPath();hist.forEach((a,i)=>{const [x,y]=xy(a);i?c.lineTo(x,y):c.moveTo(x,y);});if(hist.length===1){const [x,y]=xy(hist[0]);c.lineTo(x+1,y);}c.strokeStyle=color;c.lineWidth=index?1.5:1.9;c.setLineDash(index?[4,3]:[]);c.stroke();c.setLineDash([]);
     if(!index){const last=xy(hist.at(-1)),first=xy(hist[0]);c.lineTo(last[0],top+ph);c.lineTo(first[0],top+ph);c.closePath();const gradient=c.createLinearGradient(0,top,0,top+ph);gradient.addColorStop(0,'#19897013');gradient.addColorStop(1,'#19897002');c.fillStyle=gradient;c.fill();circle(c,last[0],last[1],3,'#198970','#fff',1.5);}});c.textAlign='left';
 }
-function advance(){if(sim.iteration>=state.limit)return;sim.step();comparison?.step();if(sim.iteration>=state.limit){pause();updateMetrics();toast('反復上限に到達しました。結果を保存したり、設定を変えて再実験できます。');}}
+function advance(){if(sim.iteration>=state.limit)return;sim.step();comparison?.step();trackBestRecord();if(sim.iteration>=state.limit){pause();updateMetrics();toast('反復上限に到達しました。結果を保存したり、設定を変えて再実験できます。');}}
 function toggleRun(){if(state.running){pause();updateMetrics();draw();drawChart();return;}if(sim.iteration>=state.limit)reset();state.running=true;lastTime=performance.now();accumulator=0;updateRunButton();}
 function frame(time){
   if(state.running&&!document.hidden){const delta=Math.min((time-lastTime)/1000,.12);if(state.speed==='fast')accumulator=5000;else accumulator=Math.min(5000,accumulator+delta*30*state.speed);let count=0;const start=performance.now();while(accumulator>=1&&state.running&&count<5000&&performance.now()-start<10){advance();accumulator--;count++;}if(count){if(time-lastDrawTime>=33||!state.running){draw();drawChart();lastDrawTime=time;}if(time-lastMetricTime>80){updateMetrics();lastMetricTime=time;}}}
@@ -272,6 +317,9 @@ $('aboutNav').addEventListener('click',about);$('shortcutBtn').addEventListener(
 $('labNav').addEventListener('click',()=>{if($('infoDialog').open)$('infoDialog').close();window.scrollTo({top:0,behavior:'smooth'});});
 $('menuBtn').addEventListener('click',()=>$('sidebar').classList.toggle('open'));
 $('closeDialog').addEventListener('click',()=>$('infoDialog').close());
+$('bestRecordListBtn').addEventListener('click',showBestRecordList);
+$('dialogContent').addEventListener('change',e=>{if(e.target.id==='bestRecordFilter')renderBestRecordList();});
+$('dialogContent').addEventListener('click',async e=>{if(e.target.closest('#bestRecordExport')){try{const records=await bestBook.list();downloadText('heuristic-lab-best-records.json',JSON.stringify({format:'heuristic-lab-best-records-v1',exportedAt:new Date().toISOString(),records},null,2));}catch{toast('記録を保存できませんでした');}}});
 $('dialogContent').addEventListener('click',e=>{
   if(!e.target.closest('#applyDeliveryInput'))return;
   try{const orders=parseDeliveryInput($('deliveryInputText').value);deliveryOrders=orders;renderUI();reset({newProblem:true});$('infoDialog').close();toast('1,000件の入力を読み込みました');}
@@ -290,7 +338,7 @@ scene.addEventListener('pointerdown',e=>{
   if(nearest>=0){dragged=nearest;scene.setPointerCapture(e.pointerId);scene.style.cursor='grabbing';}
 });
 scene.addEventListener('pointermove',e=>{if(dragged<0)return;const r=scene.getBoundingClientRect();problem.points[dragged]=[clamp((e.clientX-r.left-30)/(r.width-60),.02,.98),clamp((e.clientY-r.top-26)/(r.height-85),.02,.98)];draw();});
-function finishDrag(){if(dragged<0)return;dragged=-1;scene.style.cursor='';problem.dist=problem.points.map(a=>problem.points.map(b=>Math.hypot(a[0]-b[0],a[1]-b[1])));reset();toast('都市の位置を更新し、探索をリセットしました');}
+function finishDrag(){if(dragged<0)return;dragged=-1;scene.style.cursor='';const points=problem.points.map(point=>point.slice());problem={...problem,points,dist:points.map(a=>points.map(b=>Math.hypot(a[0]-b[0],a[1]-b[1]))),datasetSource:'edited'};reset();toast('都市の位置を更新し、探索をリセットしました');}
 scene.addEventListener('pointerup',finishDrag);scene.addEventListener('pointercancel',finishDrag);
 scene.addEventListener('pointerdown',inspectKnapsack);
 scene.addEventListener('pointerdown',inspectDelivery);
