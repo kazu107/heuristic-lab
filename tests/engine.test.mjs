@@ -76,6 +76,7 @@ test('one million steps preserve a bounded full-run history and exact endpoint',
   assert.ok(sim.history.length<=2400);assert.equal(sim.history[0].iteration,0);
   assert.ok(sim.history.some(h=>h.iteration>0&&h.iteration<250000));
   assert.ok(sim.history.some(h=>h.iteration>400000&&h.iteration<600000));
+  for(const iteration of [1,2,10,32,100,1000,10000,100000])assert.ok(sim.history.some(h=>h.iteration===iteration),`Missing early/logarithmic checkpoint ${iteration}`);
   const endpoint=sim.history.at(-1);assert.equal(endpoint.iteration,1000000);assert.equal(endpoint.best,sim.bestScore);assert.equal(endpoint.evaluations,sim.evaluations);
   assert.ok(sim.history.every((h,i)=>i===0||h.iteration>sim.history[i-1].iteration));
   assert.ok(sim.history.every((h,i)=>i===0||h.best<=sim.history[i-1].best));

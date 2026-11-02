@@ -2,13 +2,14 @@ import {PROBLEMS, METHODS, FUNCTIONS, GRAPH_CONNECTIONS, ITERATION_LIMITS, creat
 import {knapsackLayout,knapsackItemAt} from './knapsack-view.mjs';
 import {parseDeliveryInput,deliveryScore,deliveryOrderIds,isDeliveryRoute,formatDeliveryInput,formatDeliveryOutput} from './delivery.mjs';
 import {drawDelivery,deliveryGeometry,deliveryHitTest} from './delivery-view.mjs';
+import {iterationAxis} from './chart-axis.mjs';
 
 const $ = id => document.getElementById(id);
 const icon = (name,cls='') => `<svg class="icon ${cls}" aria-hidden="true"><use href="#i-${name}"/></svg>`;
 const fmt = (v,d=3) => Math.abs(v)<1e-7?'0':Number(v).toLocaleString('en-US',{maximumFractionDigits:d,minimumFractionDigits:Number.isInteger(v)?0:d});
 const scoreText = v => state.type==='function'&&v>0&&v<.01?v.toExponential(2):fmt(v);
 const clamp = (v,a,b) => Math.max(a,Math.min(b,v));
-const state = {type:'tsp', method:'sa', size:40, seed:42, variant:'rastrigin', colors:PROBLEMS.coloring.colors, functionLayout:'shifted',graphConnections:'standard',deliveryInitialization:'nearby',params:{}, speed:1, limit:ITERATION_LIMITS.default, compare:false, compareMethod:'ga', view:'best', ghost:true, running:false};
+const state = {type:'tsp', method:'sa', size:40, seed:42, variant:'rastrigin', colors:PROBLEMS.coloring.colors, functionLayout:'shifted',graphConnections:'standard',deliveryInitialization:'nearby',chartXScale:'linear',params:{}, speed:1, limit:ITERATION_LIMITS.default, compare:false, compareMethod:'ga', view:'best', ghost:true, running:false};
 try {
   const saved = JSON.parse(localStorage.getItem('heuristic-lab-v1') || 'null');
   if(saved && PROBLEMS[saved.type] && METHODS[saved.method]?.problems.includes(saved.type)) {
@@ -18,6 +19,7 @@ try {
     state.functionLayout=saved.functionLayout==='classic'?'classic':'shifted';state.graphConnections=GRAPH_CONNECTIONS[saved.graphConnections]?saved.graphConnections:'standard';
     if(Number.isFinite(saved.limit))state.limit=clamp(Math.round(saved.limit),ITERATION_LIMITS.min,ITERATION_LIMITS.max);
     state.deliveryInitialization=saved.deliveryInitialization==='random'?'random':'nearby';
+    state.chartXScale=saved.chartXScale==='log'?'log':'linear';
     for(const [key,,min,max] of parametersFor(state.method,state.type))if(Number.isFinite(saved.params?.[key]))state.params[key]=clamp(saved.params[key],min,max);
     if(!saved.observationVersion){
       if(saved.colors===4)state.colors=PROBLEMS.coloring.colors;
@@ -34,7 +36,8 @@ state.params={...defaults(state.method,state.type),...state.params};
 let problem, sim, comparison, toastTimer, accumulator=0, lastTime=0, dragged=-1, heatmapCache=null, lastMetricTime=0, lastDrawTime=0, itemLayout=null, inspectedItem=-1, speedCustomized=false, deliveryOrders=null, deliveryFocus=-1;
 const scene=$('scene'), ctx=scene.getContext('2d'), chart=$('chart'), chartCtx=chart.getContext('2d');
 
-function persist(){try{localStorage.setItem('heuristic-lab-v1',JSON.stringify({type:state.type,method:state.method,size:state.size,seed:state.seed,variant:state.variant,colors:state.colors,functionLayout:state.functionLayout,graphConnections:state.graphConnections,deliveryInitialization:state.deliveryInitialization,observationVersion:1,params:state.params,limit:state.limit}));}catch{}}
+function persist(){try{localStorage.setItem('heuristic-lab-v1',JSON.stringify({type:state.type,method:state.method,size:state.size,seed:state.seed,variant:state.variant,colors:state.colors,functionLayout:state.functionLayout,graphConnections:state.graphConnections,deliveryInitialization:state.deliveryInitialization,chartXScale:state.chartXScale,observationVersion:1,params:state.params,limit:state.limit}));}catch{}}
+function syncChartAxis(){const log=state.chartXScale==='log';$('chartXScale').value=state.chartXScale;$('chartAxisLabel').textContent=log?'反復回数（対数） →':'反復回数 →';$('chartScaleNote').hidden=!log;$('chart').setAttribute('aria-label',log?'1反復目以降の反復回数を対数軸にした最良目的値の推移':'反復回数に対する最良目的値の推移');}
 function applyProblemPace(){if(!speedCustomized)state.speed=['function','coloring'].includes(state.type) ? .5 : 1;$('speed').value=String(state.speed);}
 function toast(message){$('toast').textContent=message;$('toast').classList.add('show');clearTimeout(toastTimer);toastTimer=setTimeout(()=>$('toast').classList.remove('show'),2600);}
 function pause(){state.running=false;accumulator=0;updateRunButton();}
@@ -61,6 +64,7 @@ function ensureComparison(){if(state.compareMethod===state.method||!METHODS[stat
 const help={temperature:'高いほど、改悪する移動も受け入れやすくなります。',cooling:'1に近いほど、ゆっくり温度が下がります。',stepSize:'関数の移動幅。離散問題では固定の近傍操作を使います。',population:'1ステップで探索する候補の数。',mutation:'子個体に近傍変化を加える確率。',crossover:'親の情報を組み合わせる確率。',inertia:'直前の移動方向を維持する強さ。',cognitive:'自分の最良位置に引かれる強さ。',social:'群れの最良位置に引かれる強さ。',alpha:'フェロモンの情報を重視する度合い。',beta:'近い都市を選びやすくする度合い。',evaporation:'1ステップで失われるフェロモンの割合。',differential:'個体間の差を増幅する強さ。',orderSwapRate:'近傍操作で注文を入れ替える割合。GAでは突然変異に適用します。',candidatePool:'近い候補を主に試し、一部は全1,000件から探します。'};
 const insights={sa:['遠回りが、近道になる。','焼きなまし法は、あえて悪い変化も受け入れます。温度を少しずつ下げることで、探索と集中のバランスが変わっていきます。'],ga:['よいアイデアは、受け継がれる。','小さな突然変異が、新しい可能性を生むことも。個体数と変異率を変えて、集団の多様性と収束の関係を観察しましょう。'],pso:['ひとりの発見が、群れを動かす。','自己の経験と、群れの発見。2つの重みを変えると、粒子の集まり方が変わります。強すぎる引力は振動を起こすことも。'],aco:['小さな足跡が、道になる。','フェロモンを忘れる速さが探索を変えます。蒸発を弱くすると過去を信じ、強くすると新しい道を試しやすくなります。'],de:['違いの中に、次の一歩がある。','集団が広がっていると大きな一歩に、集まると小さな一歩に。個体間の差分を使うことで、移動幅も自然に変わります。'],hill:['一歩ずつ、けれど慎重に。','改善だけを受け入れると、近くの頂上で止まることもあります。同じ問題を焼きなまし法で解いて、その違いを比べてみましょう。']};
 function renderUI(){
+  syncChartAxis();
   const p=PROBLEMS[state.type],m=METHODS[state.method];
   $('problemCount').textContent=Object.keys(PROBLEMS).length;
   $('problemList').innerHTML=Object.entries(PROBLEMS).map(([key,p])=>`<button class="problem-item ${key===state.type?'active':''}" data-problem="${key}" aria-pressed="${key===state.type}"><span class="problem-icon">${icon(p.icon)}</span><span><strong>${p.name}</strong><small>${p.en}</small></span>${key===state.type?icon('chevron'):''}</button>`).join('');
@@ -199,14 +203,16 @@ function draw(){if(!sim)return;const [w,h]=canvasSize(scene,ctx);if(!w||!h)retur
 function drawChart(){
   if(!sim)return;const [w,h]=canvasSize(chart,chartCtx),c=chartCtx;if(!w||!h)return;c.clearRect(0,0,w,h);
   const left=42,right=9,top=8,bottom=22,pw=w-left-right,ph=h-top-bottom;
-  const histories=[sim.history,...(comparison?[comparison.history]:[])];
-  const values=histories.flatMap(hist=>hist.map(a=>value(a.best)));let lo=Math.min(...values),hi=Math.max(...values);if(hi-lo<1e-9){const d=Math.max(1,Math.abs(hi)*.15);lo-=d*.4;hi+=d*.6;}else {const pad=(hi-lo)*.12;lo-=pad;hi+=pad;}
-  const end=Math.max(100,sim.iteration),xy=a=>[left+a.iteration/end*pw,top+(hi-value(a.best))/(hi-lo)*ph];
+  const axis=iterationAxis(sim.iteration,state.chartXScale,pw);
+  const records=[sim.history,...(comparison?[comparison.history]:[])],histories=records.map(hist=>hist.filter(a=>axis.position(a.iteration)!==null));
+  const visible=histories.flatMap(hist=>hist.map(a=>value(a.best))),values=records.flatMap(hist=>hist.map(a=>value(a.best)));let lo=Math.min(...values),hi=Math.max(...values);if(hi-lo<1e-9){const d=Math.max(1,Math.abs(hi)*.15);lo-=d*.4;hi+=d*.6;}else {const pad=(hi-lo)*.12;lo-=pad;hi+=pad;}
+  const xy=a=>[left+axis.position(a.iteration)*pw,top+(hi-value(a.best))/(hi-lo)*ph];
   c.font='8px "DM Sans", sans-serif';c.lineWidth=.7;
   for(let i=0;i<4;i++){const y=top+i/3*ph;c.strokeStyle='#edf0f0';c.beginPath();c.moveTo(left,y);c.lineTo(w-right,y);c.stroke();c.fillStyle='#a6b2b5';c.textAlign='right';const label=hi-(hi-lo)*i/3;c.fillText(Math.abs(label)>=1000?`${(label/1000).toFixed(1)}k`:fmt(label,Math.abs(label)<10?2:1),left-9,y+3);}
-  c.textAlign='center';for(let i=0;i<5;i++){const x=left+i/4*pw;c.fillStyle='#aab4b8';c.fillText(fmt(Math.round(end*i/4),0),x,h-5);}
-  histories.forEach((hist,index)=>{const color=index?'#9981cd':'#198970';c.beginPath();hist.forEach((a,i)=>{const [x,y]=xy(a);i?c.lineTo(x,y):c.moveTo(x,y);});if(hist.length===1){const [x,y]=xy(hist[0]);c.lineTo(x+1,y);}c.strokeStyle=color;c.lineWidth=index?1.5:1.9;c.setLineDash(index?[4,3]:[]);c.stroke();c.setLineDash([]);
-    if(!index){const last=xy(hist.at(-1));c.lineTo(last[0],top+ph);c.lineTo(left,top+ph);c.closePath();const gradient=c.createLinearGradient(0,top,0,top+ph);gradient.addColorStop(0,'#19897013');gradient.addColorStop(1,'#19897002');c.fillStyle=gradient;c.fill();circle(c,last[0],last[1],3,'#198970','#fff',1.5);}});c.textAlign='left';
+  for(const tick of axis.ticks){const x=left+tick.position*pw;c.fillStyle='#aab4b8';c.textAlign=tick.position===0?'left':tick.position===1?'right':'center';c.fillText(tick.label,x,h-5);if(state.chartXScale==='log'){c.strokeStyle='#edf0f0';c.beginPath();c.moveTo(x,top);c.lineTo(x,top+ph);c.stroke();}}
+  if(!visible.length){c.textAlign='center';c.fillStyle='#a2b0aa';c.fillText('1反復目から表示します',left+pw/2,top+ph/2);}
+  histories.forEach((hist,index)=>{if(!hist.length)return;const color=index?'#9981cd':'#198970';c.beginPath();hist.forEach((a,i)=>{const [x,y]=xy(a);i?c.lineTo(x,y):c.moveTo(x,y);});if(hist.length===1){const [x,y]=xy(hist[0]);c.lineTo(x+1,y);}c.strokeStyle=color;c.lineWidth=index?1.5:1.9;c.setLineDash(index?[4,3]:[]);c.stroke();c.setLineDash([]);
+    if(!index){const last=xy(hist.at(-1)),first=xy(hist[0]);c.lineTo(last[0],top+ph);c.lineTo(first[0],top+ph);c.closePath();const gradient=c.createLinearGradient(0,top,0,top+ph);gradient.addColorStop(0,'#19897013');gradient.addColorStop(1,'#19897002');c.fillStyle=gradient;c.fill();circle(c,last[0],last[1],3,'#198970','#fff',1.5);}});c.textAlign='left';
 }
 function advance(){if(sim.iteration>=state.limit)return;sim.step();comparison?.step();if(sim.iteration>=state.limit){pause();updateMetrics();toast('反復上限に到達しました。結果を保存したり、設定を変えて再実験できます。');}}
 function toggleRun(){if(state.running){pause();updateMetrics();draw();drawChart();return;}if(sim.iteration>=state.limit)reset();state.running=true;lastTime=performance.now();accumulator=0;updateRunButton();}
@@ -223,7 +229,7 @@ function about(){showDialog('<h2 class="dialog-title">好奇心のための、�
 function shortcuts(){showDialog(`<h2 class="dialog-title">手を止めずに、探索する。</h2><p class="dialog-description">入力欄を操作していないときに使えます。</p>${[['Space','実行 / 一時停止'],['→','1ステップ進める'],['R','同じ問題でリセット'],['N','新しい問題を生成'],['?','このヘルプを開く'],['Esc','ダイアログを閉じる']].map(([k,v])=>`<div class="shortcut-row"><span>${v}</span><kbd>${k}</kbd></div>`).join('')}`);}
 function exportResults(){
   const {f,...p}=problem;
-  const data={format:'heuristic-lab-v1',exportedAt:new Date().toISOString(),problem:p,settings:{...state,running:undefined},primary:sim.snapshot(),comparison:comparison?.snapshot()||null,...(state.type==='delivery'?{officialFormulaScore:deliveryScore(sim.bestScore),atcoderOutput:formatDeliveryOutput(problem,sim.best)}:{}),notes:'Scores are minimized; knapsack scores are negative values. History is uniformly downsampled to at most 2400 records, preserving the initial and latest points. Parameters may have been adjusted during the run.'};
+  const data={format:'heuristic-lab-v1',exportedAt:new Date().toISOString(),problem:p,settings:{...state,running:undefined},primary:sim.snapshot(),comparison:comparison?.snapshot()||null,...(state.type==='delivery'?{officialFormulaScore:deliveryScore(sim.bestScore),atcoderOutput:formatDeliveryOutput(problem,sim.best)}:{}),notes:'Scores are minimized; knapsack scores are negative values. History is bounded to 2400 samples, preserving initial/latest points and early/logarithmic checkpoints. Logarithmic charts omit iteration zero; the export retains it. Parameters may have been adjusted during the run.'};
   const blob=new Blob([JSON.stringify(data,null,2)],{type:'application/json'}),url=URL.createObjectURL(blob),link=document.createElement('a');link.href=url;link.download=`heuristic-lab-${state.type}-${state.method}-seed${state.seed}.json`;link.click();setTimeout(()=>URL.revokeObjectURL(url),1000);toast('実験結果をJSONで保存しました');
 }
 
@@ -246,6 +252,7 @@ function setIterationLimit(value){const n=Number(value);if(value!==''&&Number.is
 $('limitInput').addEventListener('change',e=>setIterationLimit(e.target.value));
 $('limitInput').addEventListener('keydown',e=>{if(e.key==='Enter'){e.preventDefault();setIterationLimit(e.target.value);e.target.blur();}});
 $('speed').addEventListener('change',e=>{state.speed=e.target.value==='fast'?'fast':Number(e.target.value);speedCustomized=true;accumulator=0;});
+$('chartXScale').addEventListener('change',e=>{state.chartXScale=e.target.value==='log'?'log':'linear';syncChartAxis();drawChart();persist();});
 $('runBtn').addEventListener('click',toggleRun);
 $('quickRun').addEventListener('click',toggleRun);
 $('stepBtn').addEventListener('click',()=>{advance();updateMetrics();draw();drawChart();});

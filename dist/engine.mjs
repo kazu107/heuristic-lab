@@ -8,6 +8,10 @@ const clamp = (x, a, b) => Math.min(b, Math.max(a, x));
 const copy = x => x.slice();
 const shuffle = (a, rng) => {for(let i=a.length-1;i>0;i--){const j=Math.floor(rng()*(i+1));[a[i],a[j]]=[a[j],a[i]];}return a;};
 const gaussian = r => Math.sqrt(-2 * Math.log(Math.max(1e-10,r()))) * Math.cos(2 * Math.PI * r());
+// Keep early and logarithmically spaced samples even after long-run compaction.
+const LOG_HISTORY_POINTS=new Set(Array.from({length:33},(_,i)=>i));
+for(let n=1;n<=1000000;n=Math.max(n+1,Math.ceil(n*1.05)))LOG_HISTORY_POINTS.add(n);
+for(let n=1;n<=1000000;n*=10)LOG_HISTORY_POINTS.add(n);
 export const FUNCTIONS = {
   rastrigin: {name:'Rastrigin', range:5.12, formula:'f(x, y) = 20 + x² + y² − 10(cos 2πx + cos 2πy)', f:(x,y)=>20+x*x+y*y-10*(Math.cos(2*Math.PI*x)+Math.cos(2*Math.PI*y)), optimum:[0,0]},
   ackley: {name:'Ackley',range:5,formula:'f(x, y) = −20e^(−0.2√((x²+y²)/2)) − e^((cos 2πx+cos 2πy)/2) + 20 + e',f:(x,y)=>-20*Math.exp(-.2*Math.sqrt((x*x+y*y)/2))-Math.exp((Math.cos(2*Math.PI*x)+Math.cos(2*Math.PI*y))/2)+20+Math.E,optimum:[0,0]},
@@ -168,10 +172,10 @@ export class Simulation {
     this.iteration++;if(p.type==='function'){this.trail.push(copy(this.current));if(this.trail.length>120)this.trail.shift();}this.record();return this.bestScore;
   }
   record(){
-    // Preserve samples across the whole run plus an always-current endpoint.
-    const last=this.history.at(-1);if(last&&last.iteration%this.historyStride!==0)this.history.pop();
+    // Combine full-run uniform samples, early/logarithmic checkpoints and a live endpoint.
+    const last=this.history.at(-1);if(last&&last.iteration%this.historyStride!==0&&!LOG_HISTORY_POINTS.has(last.iteration))this.history.pop();
     this.history.push({iteration:this.iteration,evaluations:this.evaluations,best:this.bestScore,current:this.currentScore});
-    if(this.history.length>2400){this.historyStride*=2;this.history=this.history.filter(h=>h.iteration%this.historyStride===0||h.iteration===this.iteration);}
+    if(this.history.length>2400){this.historyStride*=2;this.history=this.history.filter(h=>h.iteration%this.historyStride===0||LOG_HISTORY_POINTS.has(h.iteration)||h.iteration===this.iteration);}
   }
   snapshot(){return {method:this.method,params:{...this.params},iterations:this.iteration,evaluations:this.evaluations,bestScore:this.bestScore,bestSolution:copy(this.best),historySampleStride:this.historyStride,history:this.history.map(h=>({...h}))};}
 }

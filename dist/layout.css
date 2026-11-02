@@ -298,3 +298,10 @@ main {
 .metric strong.long-number { font-size: 20px; }
 @media (min-width: 1600px) { .size-presets button { font-size: 11px; } .metric strong.long-number { font-size: 30px; } }
 @media (max-width: 650px) { .speed-control select { width: 69px; } }
+
+.chart-controls { display: flex; align-items: center; gap: 8px; flex: none; }
+.chart-scale-control { display: flex; align-items: center; gap: 6px; color: #81958b; font-size: 9px; white-space: nowrap; }
+.chart-scale-control select { width: 65px; min-height: 27px; padding: 4px 6px; font-family: var(--font); font-size: 9px; }
+.chart-scale-note { color: #91a198; font-size: 8.5px; line-height: 1.8; margin: 0 18px 13px; }
+@media (min-width: 1600px) { .chart-scale-control { font-size: 10px; } .chart-scale-control select { width: 70px; font-size: 10px; } .chart-scale-note { font-size: 9px; } }
+@media (max-width: 359px) { .chart-controls { gap: 5px; } .chart-scale-control { gap: 4px; font-size: 8px; } .chart-scale-control select { width: 60px; font-size: 8px; } }
